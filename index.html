@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AI Clone — Landing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-top: #fdf3f0;
+    --bg-bottom: #fadcd6;
+    --ink: #2a0f0a;
+    --ink-soft: #3a1a14;
+    --coral: #e87268;
+    --coral-deep: #d85b51;
+    --coral-soft: #f3a59f;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 88px 32px 120px;
+    text-align: center;
+  }
+  h1.hero {
+    font-weight: 800;
+    font-size: clamp(34px, 5.2vw, 68px);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 auto;
+    max-width: 1040px;
+    text-wrap: balance;
+  }
+  h1.hero .accent { color: var(--coral); }
+  .sub {
+    margin: 28px auto 0;
+    max-width: 720px;
+    font-size: clamp(15px, 1.25vw, 18px);
+    line-height: 1.55;
+    color: var(--ink-soft);
+    text-wrap: pretty;
+  }
+  .video-card {
+    margin: 56px auto 0;
+    max-width: 900px;
+    aspect-ratio: 16 / 9;
+    border-radius: 14px;
+    overflow: hidden;
+    position: relative;
+    background:
+      radial-gradient(120% 80% at 20% 0%, #ffffff 0%, #fde6e0 45%, #f5b6ad 100%);
+    box-shadow: 0 30px 60px -30px rgba(126, 30, 20, 0.35);
+    cursor: pointer;
+    user-select: none;
+  }
+  .video-card::before {
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      repeating-linear-gradient( 45deg,
+        rgba(255,255,255,0.08) 0px,
+        rgba(255,255,255,0.08) 2px,
+        transparent 2px,
+        transparent 14px );
+    pointer-events: none;
+  }
+  .video-inner {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+    gap: 18px;
+    padding: 40px;
+    text-align: center;
+  }
+  .video-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(42, 15, 10, 0.55);
+  }
+  .video-title {
+    font-weight: 800;
+    font-size: clamp(28px, 4.2vw, 56px);
+    line-height: 1.02;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .video-title .em { color: var(--coral-deep); display: block; }
+  .play {
+    margin-top: 8px;
+    width: 78px; height: 56px;
+    border-radius: 14px;
+    background: rgba(20,8,5,0.62);
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(2px);
+    transition: transform 200ms ease, background 200ms ease;
+  }
+  .video-card:hover .play { transform: scale(1.05); background: rgba(20,8,5,0.78); }
+  .play svg { width: 24px; height: 24px; fill: #fff; margin-left: 3px; }
+
+  .cta-row {
+    margin: 48px auto 0;
+    display: flex;
+    gap: 18px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .btn {
+    appearance: none;
+    border: none;
+    font-family: inherit;
+    font-weight: 600;
+    font-size: 17px;
+    padding: 20px 38px;
+    border-radius: 999px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+    letter-spacing: 0.005em;
+  }
+  .btn-primary {
+    background: var(--coral);
+    color: #fff;
+    box-shadow: 0 14px 30px -12px rgba(216, 91, 81, 0.6);
+  }
+  .btn-primary:hover {
+    background: var(--coral-deep);
+    transform: translateY(-2px);
+    box-shadow: 0 18px 36px -12px rgba(216, 91, 81, 0.7);
+  }
+  .btn-secondary {
+    background: #fff;
+    color: var(--ink);
+    border: 1.5px solid rgba(42, 15, 10, 0.12);
+    box-shadow: 0 14px 30px -16px rgba(42, 15, 10, 0.25);
+  }
+  .btn-secondary:hover {
+    transform: translateY(-2px);
+    border-color: rgba(42, 15, 10, 0.25);
+    box-shadow: 0 18px 36px -16px rgba(42, 15, 10, 0.3);
+  }
+  .btn .arrow {
+    display: inline-block;
+    transition: transform 160ms ease;
+  }
+  .btn:hover .arrow { transform: translateX(3px); }
+
+  .footnote {
+    margin: 36px auto 0;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    font-weight: 600;
+    max-width: 540px;
+    line-height: 1.6;
+  }
+
+  /* Modal for video placeholder */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(20, 8, 5, 0.6);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 50;
+    padding: 24px;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: #fff;
+    border-radius: 16px;
+    padding: 36px;
+    max-width: 460px;
+    text-align: center;
+    box-shadow: 0 40px 80px -20px rgba(0,0,0,0.4);
+  }
+  .modal h3 {
+    margin: 0 0 10px;
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .modal p {
+    margin: 0 0 22px;
+    color: var(--ink-soft);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .modal button {
+    appearance: none;
+    border: none;
+    background: var(--ink);
+    color: #fff;
+    font-family: inherit;
+    font-weight: 600;
+    padding: 12px 26px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  @media (max-width: 640px) {
+    .wrap { padding: 56px 20px 80px; }
+    .video-card { margin-top: 40px; }
+    .cta-row { flex-direction: column; align-items: stretch; padding: 0 12px; }
+    .btn { justify-content: center; padding: 18px 28px; }
+  }
+</style>
+</head>
+<body>
+
+<main class="wrap">
+
+  <h1 class="hero">
+    We Build Your <span class="accent">AI Clone</span> That Grows Your Social Media <span class="accent">Without</span> You Ever Filming Again
+  </h1>
+
+  <p class="sub">
+    [Placeholder subheadline — describe the offer in one or two sentences. Talk about who it's for and what they get without picking up a camera.]
+  </p>
+
+  <div class="video-card" id="videoCard" role="button" aria-label="Play intro video">
+    <div class="video-inner">
+      <div class="video-label">— Video placeholder · drop final film here —</div>
+      <div class="video-title">
+        How We Grow
+        <span>Your Brand</span>
+        <span class="em">Without Filming</span>
+      </div>
+      <div class="play" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="cta-row">
+    <a class="btn btn-primary" href="schedule-clients.html">
+      Schedule a Call — Clients <span class="arrow">→</span>
+    </a>
+    <a class="btn btn-secondary" href="schedule-investors.html">
+      Schedule a Call — Investors <span class="arrow">→</span>
+    </a>
+  </div>
+
+  <p class="footnote">
+    [Placeholder microcopy line · e.g. limited spots each month · book your strategy call]
+  </p>
+
+</main>
+
+<div class="modal-backdrop" id="modal" role="dialog" aria-modal="true">
+  <div class="modal">
+    <h3>Video coming soon</h3>
+    <p>Your intro film hasn't been recorded yet. Drop the final MP4 or YouTube embed into this placeholder when ready.</p>
+    <button id="closeModal">Got it</button>
+  </div>
+</div>
+
+<script>
+  const card = document.getElementById('videoCard');
+  const modal = document.getElementById('modal');
+  const close = document.getElementById('closeModal');
+  card.addEventListener('click', () => modal.classList.add('open'));
+  close.addEventListener('click', () => modal.classList.remove('open'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('open'); });
+</script>
+
+</body>
+</html>
