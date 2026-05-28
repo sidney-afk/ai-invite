@@ -654,6 +654,7 @@
   'use strict';
 
   const STORAGE_KEY = 'ai-invite-whiteboard-v1';
+  const VIEW_KEY    = 'ai-invite-whiteboard-view-v1';
   const IDB_NAME = 'ai-invite-wb';
   const IDB_STORE = 'assets';
   const IDB_VERSION = 1;
@@ -793,13 +794,16 @@
 
   /* ---------- Persistence ---------- */
   function save() {
+    // Personal-edit save: persist items + paths so an editor can come back and
+    // resume work. View state lives in its own key (saveView) so that a casual
+    // visitor's pan/zoom doesn't shadow a freshly baked-in board.
     try {
       const safeItems = state.items.map(it => {
         if (it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) return { ...it, src: null };
         return it;
       });
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        view: state.view, items: safeItems, paths: state.paths, nextId: state.nextId
+        items: safeItems, paths: state.paths, nextId: state.nextId
       }));
     } catch (e) {
       if (e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''))) {
@@ -807,8 +811,25 @@
       }
     }
   }
+  function saveView() {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify(state.view)); } catch (e) {}
+  }
+  let _viewLoadedFromStorage = false;
+  function loadView() {
+    try {
+      const raw = localStorage.getItem(VIEW_KEY);
+      if (!raw) return;
+      const v = JSON.parse(raw);
+      if (v && typeof v.x === 'number' && typeof v.y === 'number' && typeof v.scale === 'number') {
+        state.view = v;
+        _viewLoadedFromStorage = true;
+      }
+    } catch (e) {}
+  }
   async function loadFromObject(obj) {
-    state.view = obj.view || state.view;
+    // Saved view (separate storage key) wins; otherwise inherit the
+    // baked / imported view; otherwise leave the in-memory default.
+    if (obj.view && !_viewLoadedFromStorage) state.view = obj.view;
     state.items = obj.items || [];
     state.paths = obj.paths || [];
     state.nextId = obj.nextId || (state.items.length + state.paths.length + 1);
@@ -848,17 +869,37 @@
   }
 
   async function load() {
+    // ?reset / ?fresh URL flag wipes any stale local state on this device so
+    // the baked-in board is what the visitor sees.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('reset') || params.has('fresh')) {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(VIEW_KEY);
+        try {
+          const keys = await idbKeys();
+          for (const k of keys) await idbDelete(k);
+        } catch (e) {}
+        // Clean the URL so reloads don't keep wiping
+        try { history.replaceState({}, '', window.location.pathname); } catch (e) {}
+      }
+    } catch (e) {}
+
+    loadView();
+    const baked = readBakedData();
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const obj = JSON.parse(raw);
         if (validateBoard(obj)) {
-          await loadFromObject(obj);
-          return;
+          const isEmptyPersonal = (!obj.items || obj.items.length === 0) && (!obj.paths || obj.paths.length === 0);
+          // If the personal save is effectively empty, fall through to baked
+          if (!isEmptyPersonal) {
+            await loadFromObject(obj);
+            return;
+          }
         }
       }
-      // No personal save — try the board baked into this HTML page.
-      const baked = readBakedData();
       if (baked) {
         await loadFromObject(baked);
         return;
@@ -2116,10 +2157,11 @@
     state.view.scale = newScale;
     state.view.x = lx - wx * newScale;
     state.view.y = ly - wy * newScale;
-    applyView(); save();
+    applyView();
+    saveView();
   }
   function zoomAtCenter(s) { const r = viewport.getBoundingClientRect(); zoomAt(r.left + r.width/2, r.top + r.height/2, s); }
-  function resetView() { state.view = { x: 40, y: 0, scale: 0.85 }; applyView(); save(); }
+  function resetView() { state.view = { x: 40, y: 0, scale: 0.85 }; applyView(); saveView(); }
 
   /* ---------- Double-click to edit text ---------- */
   itemsLayer.addEventListener('dblclick', (e) => {
@@ -2271,7 +2313,7 @@
   redoBtn.addEventListener('click', redo);
 
   document.getElementById('clearBtn').addEventListener('click', () => {
-    if (!confirm('Clear the whole board? You can undo with Ctrl+Z.')) return;
+    if (!confirm('Clear the whole board? This also drops your personal save so next reload will show the published board. Use Ctrl+Z to undo until then.')) return;
     // Revoke blob urls and drop IDB assets for everything being removed
     for (const it of state.items) {
       if (it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) {
@@ -2280,7 +2322,9 @@
       if (it.assetId) idbDelete(it.assetId).catch(() => {});
     }
     state.items = []; state.paths = []; state.selection = [];
-    renderAll(); commitHistory(); save();
+    // Remove the personal save entirely so the baked board can take over on reload
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+    renderAll(); commitHistory();
     showToast('Board cleared');
   });
 
