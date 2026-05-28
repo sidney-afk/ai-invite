@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
 <title>Whiteboard — AI Invite</title>
+<link rel="icon" type="image/svg+xml" href="favicon-whiteboard.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -269,9 +270,9 @@
   .item.image img, .item.video video {
     width: 100%; height: 100%;
     display: block;
-    object-fit: cover;
-    pointer-events: none;
+    object-fit: contain;
   }
+  .item.image img { pointer-events: none; }
   .item.audio {
     background: #fff;
     padding: 10px 12px;
@@ -1319,6 +1320,30 @@
       r.readAsDataURL(file);
     });
   }
+  function probeMediaDims(type, src) {
+    return new Promise((resolve) => {
+      if (type === 'image') {
+        const img = new Image();
+        img.onload  = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+        img.onerror = () => resolve(null);
+        img.src = src;
+      } else if (type === 'video') {
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        v.onloadedmetadata = () => resolve({ w: v.videoWidth, h: v.videoHeight });
+        v.onerror = () => resolve(null);
+        v.src = src;
+      } else {
+        resolve(null);
+      }
+    });
+  }
+  function fitBoxToAspect(natural, fallback, maxDim) {
+    if (!natural || !natural.w || !natural.h) return fallback;
+    const aspect = natural.w / natural.h;
+    if (aspect >= 1) return { w: maxDim, h: Math.round(maxDim / aspect) };
+    return { w: Math.round(maxDim * aspect), h: maxDim };
+  }
   async function addMediaItem(type, file, center) {
     let src;
     const maxBytesForDataURL = type === 'image' ? 4*1024*1024 : 1*1024*1024;
@@ -1329,9 +1354,15 @@
       showToast('Could not read file', 'danger');
       return;
     }
-    const dims = type === 'audio' ? { w: 280, h: 60 }
-               : type === 'video' ? { w: 360, h: 220 }
-               : { w: 280, h: 200 };
+    let dims;
+    if (type === 'audio') {
+      dims = { w: 320, h: 60 };
+    } else {
+      const natural = await probeMediaDims(type, src);
+      const maxDim = type === 'video' ? 360 : 320;
+      const fallback = type === 'video' ? { w: 360, h: 200 } : { w: 280, h: 200 };
+      dims = fitBoxToAspect(natural, fallback, maxDim);
+    }
     const item = { id: state.nextId++, type, x: center.x - dims.w/2, y: center.y - dims.h/2,
                     w: dims.w, h: dims.h, src, name: file.name };
     state.items.push(item);
@@ -1523,6 +1554,13 @@
       return;
     }
     if (drag.mode === 'move') {
+      // Drag threshold: ignore tiny pointer jitter so a click on a video's
+      // play button or audio control doesn't visibly nudge the item.
+      if (!drag.engaged) {
+        const px = e.clientX - drag.sx, py = e.clientY - drag.sy;
+        if (Math.hypot(px, py) < 4) return;
+        drag.engaged = true;
+      }
       let dx = (e.clientX - drag.sx) / state.view.scale;
       let dy = (e.clientY - drag.sy) / state.view.scale;
       // Shift constrains to dominant axis
