@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
 <title>Whiteboard — AI Invite</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -131,6 +131,7 @@
     position: relative;
   }
   .tool:hover { background: #faeeea; color: var(--ink); }
+  .tool:focus-visible { outline: 2px solid var(--coral-soft); outline-offset: 2px; }
   .tool.active {
     background: var(--coral);
     color: #fff;
@@ -176,6 +177,7 @@
     position: absolute; inset: 0;
     overflow: hidden;
     cursor: default;
+    touch-action: none;
   }
   .viewport.tool-pan { cursor: grab; }
   .viewport.panning { cursor: grabbing !important; }
@@ -210,14 +212,26 @@
   }
   .svg-layer .hit { pointer-events: stroke; cursor: pointer; }
   .svg-layer .path-handle { pointer-events: all; cursor: move; }
+  .svg-layer #guides line { pointer-events: none; }
 
   /* Items */
   .item {
     position: absolute;
     border-radius: 10px;
-    transition: box-shadow 120ms ease;
+    transition: box-shadow 140ms ease, transform 140ms ease;
   }
-  .item.selected { box-shadow: 0 0 0 2px var(--coral), 0 18px 36px -18px rgba(216,91,81,0.45); }
+  .item.selected {
+    box-shadow: 0 0 0 2px var(--coral), 0 18px 36px -18px rgba(216,91,81,0.45);
+    animation: selPulse 1.8s ease-in-out infinite;
+  }
+  @keyframes selPulse {
+    0%, 100% { box-shadow: 0 0 0 2px var(--coral),       0 18px 36px -18px rgba(216,91,81,0.45); }
+    50%      { box-shadow: 0 0 0 2px var(--coral-deep),  0 18px 40px -16px rgba(216,91,81,0.55); }
+  }
+  .item.arrow-target {
+    box-shadow: 0 0 0 3px var(--coral), 0 18px 36px -18px rgba(216,91,81,0.55) !important;
+    animation: none !important;
+  }
   .item.sticky {
     background: var(--sticky-yellow);
     padding: 16px;
@@ -230,6 +244,8 @@
     color: var(--ink);
     font-weight: 500;
   }
+  .item.sticky:hover { transform: translateY(-1px); box-shadow: 0 18px 34px -14px rgba(42,15,10,0.4); }
+  .item.sticky.selected:hover { transform: none; }
   .item.text {
     background: transparent;
     color: var(--ink);
@@ -269,12 +285,16 @@
     font-weight: 600;
     color: var(--ink-soft);
     white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    max-width: 120px;
   }
   .item[contenteditable="true"] {
     outline: none;
     cursor: text;
     user-select: text;
     -webkit-user-select: text;
+    animation: none !important;
   }
 
   /* Resize handles */
@@ -291,6 +311,54 @@
   .handle.bl { left: -6px; bottom: -6px; cursor: nesw-resize; }
   .handle.br { right: -6px; bottom: -6px; cursor: nwse-resize; }
 
+  /* Marquee */
+  .marquee {
+    position: absolute;
+    border: 1.5px dashed var(--coral);
+    background: rgba(232, 114, 104, 0.08);
+    pointer-events: none;
+    z-index: 18;
+    border-radius: 4px;
+  }
+
+  /* Context menu */
+  .context-menu {
+    position: fixed;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 6px;
+    min-width: 220px;
+    box-shadow: 0 30px 60px -24px rgba(42, 15, 10, 0.4);
+    z-index: 100;
+    display: none;
+  }
+  .context-menu.open { display: block; }
+  .context-menu button {
+    display: flex;
+    width: 100%;
+    border: none;
+    background: transparent;
+    padding: 8px 12px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: 6px;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+  }
+  .context-menu button:hover { background: #faeeea; }
+  .context-menu button.danger { color: #c0392b; }
+  .context-menu button span.shortcut {
+    font-size: 11px;
+    color: var(--ink-soft);
+    opacity: 0.7;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .context-menu .sep { height: 1px; background: var(--line); margin: 4px 8px; }
+
   /* Help card */
   .help {
     position: absolute;
@@ -303,8 +371,8 @@
     color: var(--ink-soft);
     box-shadow: 0 24px 50px -24px rgba(42, 15, 10, 0.25);
     z-index: 20;
-    max-width: 260px;
-    line-height: 1.55;
+    max-width: 280px;
+    line-height: 1.6;
   }
   .help b { color: var(--ink); }
   .help kbd {
@@ -341,8 +409,11 @@
     opacity: 0;
     pointer-events: none;
     transition: opacity 200ms ease;
+    max-width: 80vw;
+    text-align: center;
   }
   .toast.show { opacity: 1; }
+  .toast.danger { background: #c0392b; }
 
   /* Hidden file inputs */
   .hidden-file { display: none; }
@@ -402,6 +473,7 @@
             </marker>
           </defs>
           <g id="paths"></g>
+          <g id="guides"></g>
         </svg>
         <div id="items"></div>
       </div>
@@ -469,18 +541,36 @@
       <div class="help" id="help">
         <button class="close" id="closeHelp" aria-label="Close">×</button>
         <b>Quick tips</b><br/>
-        <b>Edit text</b>: double-click a sticky / text.<br/>
-        <b>Move</b>: drag any item — linked arrows follow.<br/>
-        <b>Arrows</b>: pick the arrow tool, drag <i>from</i> one box <i>onto</i> another to link them.<br/>
-        <b>Pan</b>: hold <kbd>Space</kbd> + drag, or pick the hand tool. <b>Zoom</b>: scroll.<br/>
+        <b>Edit</b>: double-click a sticky / text.<br/>
+        <b>Move</b>: drag — attached arrows follow.<br/>
+        <b>Arrows</b>: drag <i>from</i> one box <i>onto</i> another to link.<br/>
+        <b>Multi-select</b>: drag empty canvas, or <kbd>Shift</kbd>+click. <kbd>Ctrl+A</kbd> for all.<br/>
+        <b>Copy / Paste</b>: <kbd>Ctrl+C</kbd> · <kbd>Ctrl+V</kbd> · <kbd>Ctrl+D</kbd> duplicate.<br/>
+        <b>Layers</b>: <kbd>Ctrl+]</kbd> / <kbd>Ctrl+[</kbd>, or right-click.<br/>
+        <b>Snap</b>: drag near another item to auto-align. Hold <kbd>Alt</kbd> to disable.<br/>
+        <b>Pan</b>: <kbd>Space</kbd>+drag · <b>Zoom</b>: scroll / pinch.<br/>
         <b>Undo / Redo</b>: <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd>.<br/>
-        <b>Delete</b>: select, then <kbd>⌫</kbd>.<br/>
         Auto-saves to this browser.
       </div>
 
       <div class="toast" id="toast"></div>
     </div>
   </div>
+</div>
+
+<!-- Right-click context menu -->
+<div class="context-menu" id="contextMenu">
+  <button data-action="duplicate">Duplicate <span class="shortcut">Ctrl+D</span></button>
+  <button data-action="copy">Copy <span class="shortcut">Ctrl+C</span></button>
+  <button data-action="cut">Cut <span class="shortcut">Ctrl+X</span></button>
+  <button data-action="paste">Paste <span class="shortcut">Ctrl+V</span></button>
+  <div class="sep"></div>
+  <button data-action="front" data-needs-item>Bring to front <span class="shortcut">Ctrl+Shift+]</span></button>
+  <button data-action="forward" data-needs-item>Bring forward <span class="shortcut">Ctrl+]</span></button>
+  <button data-action="backward" data-needs-item>Send backward <span class="shortcut">Ctrl+[</span></button>
+  <button data-action="back" data-needs-item>Send to back <span class="shortcut">Ctrl+Shift+[</span></button>
+  <div class="sep" data-needs-item></div>
+  <button data-action="delete" class="danger">Delete <span class="shortcut">⌫</span></button>
 </div>
 
 <input type="file" id="fileImage" class="hidden-file" accept="image/*" />
@@ -491,17 +581,16 @@
 <script>
 /* =========================================================
    AI Invite Whiteboard
-   - Vanilla single-file Miro-style canvas
-   - Pan / zoom · sticky / text / rect / arrow / pen / media
-   - Arrows are linked to items (auto-follow when boxes move)
-   - Full undo / redo history
+   Vanilla Miro-style canvas
    ========================================================= */
 (function () {
   'use strict';
 
   const STORAGE_KEY = 'ai-invite-whiteboard-v1';
   const MAX_HISTORY = 80;
-  const OFF = 100000; // svg-layer offset so negative world coords still render
+  const OFF = 100000;        // svg-layer offset
+  const GRID = 28;
+  const SNAP_THRESH = 6;
 
   const state = {
     view: { x: 0, y: 0, scale: 1 },
@@ -509,11 +598,12 @@
     color: '#fff3a3',
     items: [],
     paths: [],
-    selection: null,
+    selection: [],            // Array<{kind, id}>
     nextId: 1,
     history: [],
     historyIndex: -1
   };
+  let clipboard = null;       // { items: [...], paths: [...] }
 
   /* ---------- DOM refs ---------- */
   const viewport = document.getElementById('viewport');
@@ -521,131 +611,17 @@
   const itemsLayer = document.getElementById('items');
   const svg = document.getElementById('svg');
   const pathsLayer = document.getElementById('paths');
+  const guidesLayer = document.getElementById('guides');
   const zoomVal = document.getElementById('zoomVal');
   const toolbar = document.getElementById('toolbar');
   const colorsEl = document.getElementById('colors');
   const undoBtn = document.getElementById('undoBtn');
   const redoBtn = document.getElementById('redoBtn');
+  const zoomInBtn = document.getElementById('zoomIn');
+  const zoomOutBtn = document.getElementById('zoomOut');
+  const contextMenuEl = document.getElementById('contextMenu');
 
-  /* ---------- Persistence ---------- */
-  function save() {
-    try {
-      const safeItems = state.items.map(it => {
-        if (it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) return { ...it, src: null };
-        return it;
-      });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        view: state.view, items: safeItems, paths: state.paths, nextId: state.nextId
-      }));
-    } catch (e) { /* quota or private mode */ }
-  }
-  function load() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) { seedBoard(); return; }
-      const obj = JSON.parse(raw);
-      state.view = obj.view || state.view;
-      state.items = obj.items || [];
-      state.paths = obj.paths || [];
-      state.nextId = obj.nextId || (state.items.length + state.paths.length + 1);
-    } catch (e) { seedBoard(); }
-  }
-  function seedBoard() {
-    const id = () => state.nextId++;
-    const baseY = 200;
-    state.items = [
-      { id: id(), type: 'text', x: 120, y: 60, w: 700, h: 70, text: 'How we turn you into an AI creator', color: '#2a0f0a' }
-    ];
-    const steps = [
-      { x: 120,  text: 'Step 1\nCapture a few photos and 60 sec voice', color: '#c6f1d6', w: 180 },
-      { x: 340,  text: 'Step 2\nBuild Master Frame and voice clone',     color: '#c6f1d6', w: 180 },
-      { x: 560,  text: 'Step 3\nCreate script + generate video',         color: '#c6f1d6', w: 200 },
-      { x: 800,  text: 'Step 4\nYou review and approve',                 color: '#c6f1d6', w: 180 },
-      { x: 1020, text: 'Step 5\nPosted and tracked live',                color: '#c6f1d6', w: 180 },
-      { x: 1240, text: '15 minutes from you,\nunlimited video out',      color: '#ffd0c8', w: 200 }
-    ].map(s => {
-      const it = { id: id(), type: 'sticky', x: s.x, y: baseY, w: s.w, h: 130, text: s.text, color: s.color };
-      state.items.push(it);
-      return it;
-    });
-    state.paths = [];
-    for (let i = 0; i < steps.length - 1; i++) {
-      state.paths.push({
-        id: id(), type: 'arrow',
-        fromId: steps[i].id, toId: steps[i+1].id,
-        x1: 0, y1: 0, x2: 0, y2: 0, // recomputed from anchors
-        color: '#2a0f0a', width: 2
-      });
-    }
-    state.view = { x: 40, y: 0, scale: 0.85 };
-  }
-
-  /* ---------- History (undo/redo) ---------- */
-  function snapshot() {
-    return JSON.stringify({
-      items: state.items, paths: state.paths, nextId: state.nextId
-    });
-  }
-  function applySnapshot(s) {
-    const obj = JSON.parse(s);
-    state.items = obj.items;
-    state.paths = obj.paths;
-    state.nextId = obj.nextId;
-    state.selection = null;
-    renderAll();
-    save();
-    updateUndoButtons();
-  }
-  function commitHistory() {
-    const snap = snapshot();
-    if (state.history[state.historyIndex] === snap) return; // no real change
-    // discard any redo branch
-    state.history = state.history.slice(0, state.historyIndex + 1);
-    state.history.push(snap);
-    if (state.history.length > MAX_HISTORY) {
-      state.history.shift();
-    } else {
-      state.historyIndex++;
-    }
-    updateUndoButtons();
-  }
-  function undo() {
-    if (state.historyIndex <= 0) return false;
-    state.historyIndex--;
-    applySnapshot(state.history[state.historyIndex]);
-    showToast('Undo');
-    return true;
-  }
-  function redo() {
-    if (state.historyIndex >= state.history.length - 1) return false;
-    state.historyIndex++;
-    applySnapshot(state.history[state.historyIndex]);
-    showToast('Redo');
-    return true;
-  }
-  function updateUndoButtons() {
-    undoBtn.disabled = state.historyIndex <= 0;
-    redoBtn.disabled = state.historyIndex >= state.history.length - 1;
-  }
-
-  /* ---------- View transform ---------- */
-  function applyView() {
-    world.style.transform = `translate(${state.view.x}px, ${state.view.y}px) scale(${state.view.scale})`;
-    zoomVal.textContent = Math.round(state.view.scale * 100) + '%';
-  }
-  function screenToWorld(sx, sy) {
-    const rect = viewport.getBoundingClientRect();
-    return {
-      x: (sx - rect.left - state.view.x) / state.view.scale,
-      y: (sy - rect.top  - state.view.y) / state.view.scale
-    };
-  }
-  function viewCenterWorld() {
-    const r = viewport.getBoundingClientRect();
-    return screenToWorld(r.left + r.width/2, r.top + r.height/2);
-  }
-
-  /* ---------- Geometry helpers ---------- */
+  /* ---------- Helpers ---------- */
   function getItemById(id) { return state.items.find(i => i.id === id); }
   function boxCenter(it) { return { x: it.x + it.w/2, y: it.y + it.h/2 }; }
   function pointInItem(it, x, y) { return x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h; }
@@ -683,6 +659,145 @@
     return { x1: endA.x, y1: endA.y, x2: endB.x, y2: endB.y };
   }
 
+  /* ---------- Persistence ---------- */
+  function save() {
+    try {
+      const safeItems = state.items.map(it => {
+        if (it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) return { ...it, src: null };
+        return it;
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        view: state.view, items: safeItems, paths: state.paths, nextId: state.nextId
+      }));
+    } catch (e) {
+      if (e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''))) {
+        showToast('Storage full — export & clear to free space', 'danger');
+      }
+    }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) { seedBoard(); return; }
+      const obj = JSON.parse(raw);
+      if (!validateBoard(obj)) { seedBoard(); return; }
+      state.view = obj.view || state.view;
+      state.items = obj.items || [];
+      state.paths = obj.paths || [];
+      state.nextId = obj.nextId || (state.items.length + state.paths.length + 1);
+    } catch (e) { seedBoard(); }
+  }
+  function validateBoard(obj) {
+    if (!obj || typeof obj !== 'object') return false;
+    if (obj.items != null && !Array.isArray(obj.items)) return false;
+    if (obj.paths != null && !Array.isArray(obj.paths)) return false;
+    for (const it of (obj.items || [])) {
+      if (typeof it.id !== 'number') return false;
+      if (typeof it.type !== 'string') return false;
+      if (typeof it.x !== 'number' || typeof it.y !== 'number') return false;
+      if (typeof it.w !== 'number' || typeof it.h !== 'number') return false;
+    }
+    for (const p of (obj.paths || [])) {
+      if (typeof p.id !== 'number') return false;
+      if (p.type !== 'arrow' && p.type !== 'pen') return false;
+    }
+    return true;
+  }
+
+  function seedBoard() {
+    state.items = []; state.paths = []; state.nextId = 1;
+    const id = () => state.nextId++;
+    const baseY = 200;
+    state.items = [
+      { id: id(), type: 'text', x: 120, y: 60, w: 700, h: 70, text: 'How we turn you into an AI creator', color: '#2a0f0a' }
+    ];
+    const steps = [
+      { x: 120,  text: 'Step 1\nCapture a few photos and 60 sec voice', color: '#c6f1d6', w: 180 },
+      { x: 340,  text: 'Step 2\nBuild Master Frame and voice clone',     color: '#c6f1d6', w: 180 },
+      { x: 560,  text: 'Step 3\nCreate script + generate video',         color: '#c6f1d6', w: 200 },
+      { x: 800,  text: 'Step 4\nYou review and approve',                 color: '#c6f1d6', w: 180 },
+      { x: 1020, text: 'Step 5\nPosted and tracked live',                color: '#c6f1d6', w: 180 },
+      { x: 1240, text: '15 minutes from you,\nunlimited video out',      color: '#ffd0c8', w: 200 }
+    ].map(s => {
+      const it = { id: id(), type: 'sticky', x: s.x, y: baseY, w: s.w, h: 130, text: s.text, color: s.color };
+      state.items.push(it);
+      return it;
+    });
+    for (let i = 0; i < steps.length - 1; i++) {
+      state.paths.push({
+        id: id(), type: 'arrow',
+        fromId: steps[i].id, toId: steps[i+1].id,
+        x1: 0, y1: 0, x2: 0, y2: 0,
+        color: '#2a0f0a', width: 2
+      });
+    }
+    state.view = { x: 40, y: 0, scale: 0.85 };
+  }
+
+  /* ---------- History ---------- */
+  function snapshot() {
+    return JSON.stringify({ items: state.items, paths: state.paths, nextId: state.nextId });
+  }
+  function applySnapshot(s) {
+    const obj = JSON.parse(s);
+    state.items = obj.items;
+    state.paths = obj.paths;
+    state.nextId = obj.nextId;
+    state.selection = [];
+    renderAll();
+    save();
+    updateUndoButtons();
+  }
+  function commitHistory() {
+    const snap = snapshot();
+    if (state.history[state.historyIndex] === snap) return;
+    state.history = state.history.slice(0, state.historyIndex + 1);
+    state.history.push(snap);
+    if (state.history.length > MAX_HISTORY) state.history.shift();
+    else state.historyIndex++;
+    updateUndoButtons();
+  }
+  function undo() {
+    if (state.historyIndex <= 0) return false;
+    state.historyIndex--;
+    applySnapshot(state.history[state.historyIndex]);
+    showToast('Undo');
+    return true;
+  }
+  function redo() {
+    if (state.historyIndex >= state.history.length - 1) return false;
+    state.historyIndex++;
+    applySnapshot(state.history[state.historyIndex]);
+    showToast('Redo');
+    return true;
+  }
+  function updateUndoButtons() {
+    undoBtn.disabled = state.historyIndex <= 0;
+    redoBtn.disabled = state.historyIndex >= state.history.length - 1;
+  }
+  function updateZoomButtons() {
+    zoomInBtn.disabled = state.view.scale >= 4 - 0.001;
+    zoomOutBtn.disabled = state.view.scale <= 0.2 + 0.001;
+  }
+
+  /* ---------- Coords ---------- */
+  function applyView() {
+    world.style.transform = `translate(${state.view.x}px, ${state.view.y}px) scale(${state.view.scale})`;
+    zoomVal.textContent = Math.round(state.view.scale * 100) + '%';
+    updateZoomButtons();
+  }
+  function screenToWorld(sx, sy) {
+    const rect = viewport.getBoundingClientRect();
+    return {
+      x: (sx - rect.left - state.view.x) / state.view.scale,
+      y: (sy - rect.top  - state.view.y) / state.view.scale
+    };
+  }
+  function viewCenterWorld() {
+    const r = viewport.getBoundingClientRect();
+    return screenToWorld(r.left + r.width/2, r.top + r.height/2);
+  }
+
   /* ---------- Rendering ---------- */
   function renderAll() {
     itemsLayer.innerHTML = '';
@@ -709,7 +824,6 @@
       if (p.type === 'arrow' && (p.fromId === itemId || p.toId === itemId)) updatePathEl(p);
     }
   }
-
   function placeholderMedia(el, txt) {
     el.style.background = '#f6efed';
     el.style.color = '#8a6e68';
@@ -719,7 +833,6 @@
     el.style.fontSize = '13px';
     el.textContent = txt;
   }
-
   function makeItemEl(it) {
     const el = document.createElement('div');
     el.className = 'item ' + it.type;
@@ -743,7 +856,7 @@
     } else if (it.type === 'audio') {
       const label = document.createElement('div');
       label.className = 'audio-label';
-      label.textContent = (it.name || 'Audio').slice(0, 24);
+      label.textContent = it.name || 'Audio';
       el.appendChild(label);
       if (it.src) { const a = document.createElement('audio'); a.src = it.src; a.controls = true; el.appendChild(a); }
       else {
@@ -753,43 +866,43 @@
         el.appendChild(note);
       }
     }
-    const isSel = state.selection && state.selection.kind === 'item' && state.selection.id === it.id;
-    if (isSel) { el.classList.add('selected'); addHandles(el); }
+    if (isSelected('item', it.id)) {
+      el.classList.add('selected');
+      if (singleItemSelected() === it.id) addHandles(el);
+    }
     return el;
   }
-
   function makePathEl(p) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.dataset.id = p.id;
-    const isSel = state.selection && state.selection.kind === 'path' && state.selection.id === p.id;
+    const isSel = isSelected('path', p.id);
 
     if (p.type === 'arrow') {
       const e = computeArrowEndpoints(p);
       const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', e.x1 + OFF);
-      line.setAttribute('y1', e.y1 + OFF);
-      line.setAttribute('x2', e.x2 + OFF);
-      line.setAttribute('y2', e.y2 + OFF);
+      line.setAttribute('x1', e.x1 + OFF); line.setAttribute('y1', e.y1 + OFF);
+      line.setAttribute('x2', e.x2 + OFF); line.setAttribute('y2', e.y2 + OFF);
       line.setAttribute('stroke', isSel ? '#e87268' : (p.color || '#2a0f0a'));
       line.setAttribute('stroke-width', p.width || 2);
       line.setAttribute('stroke-linecap', 'round');
       line.setAttribute('marker-end', isSel ? 'url(#arrowhead-coral)' : 'url(#arrowhead)');
 
       const hit = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      hit.setAttribute('x1', e.x1 + OFF);
-      hit.setAttribute('y1', e.y1 + OFF);
-      hit.setAttribute('x2', e.x2 + OFF);
-      hit.setAttribute('y2', e.y2 + OFF);
+      hit.setAttribute('x1', e.x1 + OFF); hit.setAttribute('y1', e.y1 + OFF);
+      hit.setAttribute('x2', e.x2 + OFF); hit.setAttribute('y2', e.y2 + OFF);
       hit.setAttribute('stroke', 'transparent');
       hit.setAttribute('stroke-width', 14);
       hit.setAttribute('class', 'hit');
-      hit.addEventListener('mousedown', (ev) => { ev.stopPropagation(); selectPath(p.id); });
+      hit.addEventListener('pointerdown', (ev) => {
+        ev.stopPropagation();
+        if (ev.shiftKey) toggleSelection('path', p.id);
+        else selectPath(p.id);
+      });
       g.appendChild(line);
       g.appendChild(hit);
 
-      if (isSel) {
-        const handlesData = [['a', e.x1, e.y1], ['b', e.x2, e.y2]];
-        for (const [end, x, y] of handlesData) {
+      if (isSel && state.selection.length === 1) {
+        for (const [end, x, y] of [['a', e.x1, e.y1], ['b', e.x2, e.y2]]) {
           const h = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
           h.setAttribute('x', x + OFF - 6); h.setAttribute('y', y + OFF - 6);
           h.setAttribute('width', 12); h.setAttribute('height', 12);
@@ -799,7 +912,7 @@
           h.setAttribute('stroke-width', 2);
           h.setAttribute('class', 'path-handle');
           h.dataset.end = end;
-          h.addEventListener('mousedown', (ev) => {
+          h.addEventListener('pointerdown', (ev) => {
             ev.stopPropagation(); ev.preventDefault();
             drag = { mode: 'arrowEnd', id: p.id, end, changed: false };
           });
@@ -818,21 +931,24 @@
       hit.setAttribute('stroke', 'transparent');
       hit.setAttribute('stroke-width', 14);
       hit.setAttribute('class', 'hit');
-      hit.addEventListener('mousedown', (ev) => { ev.stopPropagation(); selectPath(p.id); });
+      hit.addEventListener('pointerdown', (ev) => {
+        ev.stopPropagation();
+        if (ev.shiftKey) toggleSelection('path', p.id);
+        else selectPath(p.id);
+      });
       g.appendChild(path);
       g.appendChild(hit);
     }
     return g;
   }
-
   function pointsToPath(points, offX = 0, offY = 0) {
     if (!points || !points.length) return '';
     let d = `M ${points[0].x + offX} ${points[0].y + offY}`;
     for (let i = 1; i < points.length; i++) d += ` L ${points[i].x + offX} ${points[i].y + offY}`;
     return d;
   }
-
   function addHandles(el) {
+    el.querySelectorAll('.handle').forEach(h => h.remove());
     ['tl','tr','bl','br'].forEach(pos => {
       const h = document.createElement('div');
       h.className = 'handle ' + pos;
@@ -841,58 +957,303 @@
     });
   }
 
-  /* ---------- Selection: IN-PLACE update so dblclick fires ---------- */
-  function setSelection(sel) {
+  /* ---------- Selection ---------- */
+  function selKey(s) { return s.kind + ':' + s.id; }
+  function isSelected(kind, id) { return state.selection.some(s => s.kind === kind && s.id === id); }
+  function singleItemSelected() {
+    if (state.selection.length !== 1) return null;
+    return state.selection[0].kind === 'item' ? state.selection[0].id : null;
+  }
+  function setSelection(arr) {
     const prev = state.selection;
-    state.selection = sel;
-    if (prev) {
-      if (prev.kind === 'item') {
-        const el = itemsLayer.querySelector(`.item[data-id="${prev.id}"]`);
+    const next = arr ? arr.slice() : [];
+    const prevSet = new Set(prev.map(selKey));
+    const nextSet = new Set(next.map(selKey));
+    // Commit state.selection FIRST so updatePathEl / isSelected reflect the new state
+    state.selection = next;
+    // Remove highlights from items no longer in selection
+    for (const s of prev) {
+      if (nextSet.has(selKey(s))) continue;
+      if (s.kind === 'item') {
+        const el = itemsLayer.querySelector(`.item[data-id="${s.id}"]`);
         if (el) {
           el.classList.remove('selected');
           el.querySelectorAll('.handle').forEach(h => h.remove());
         }
-      } else if (prev.kind === 'path') {
-        const p = state.paths.find(x => x.id === prev.id);
+      } else {
+        const p = state.paths.find(x => x.id === s.id);
         if (p) updatePathEl(p);
       }
     }
-    if (sel) {
-      if (sel.kind === 'item') {
-        const el = itemsLayer.querySelector(`.item[data-id="${sel.id}"]`);
-        if (el) { el.classList.add('selected'); addHandles(el); }
-      } else if (sel.kind === 'path') {
-        const p = state.paths.find(x => x.id === sel.id);
+    // Apply highlights to newly selected items
+    for (const s of next) {
+      if (prevSet.has(selKey(s))) continue;
+      if (s.kind === 'item') {
+        const el = itemsLayer.querySelector(`.item[data-id="${s.id}"]`);
+        if (el) {
+          el.classList.add('selected');
+          el.querySelectorAll('.handle').forEach(h => h.remove());
+          if (next.length === 1) addHandles(el);
+        }
+      } else {
+        const p = state.paths.find(x => x.id === s.id);
         if (p) updatePathEl(p);
+      }
+    }
+    // If size transitioned 1<->many, refresh handles on items that stayed selected
+    if ((prev.length === 1) !== (next.length === 1)) {
+      for (const s of next) {
+        if (!prevSet.has(selKey(s))) continue;
+        if (s.kind === 'item') {
+          const el = itemsLayer.querySelector(`.item[data-id="${s.id}"]`);
+          if (el) {
+            el.querySelectorAll('.handle').forEach(h => h.remove());
+            if (next.length === 1) addHandles(el);
+          }
+        }
       }
     }
   }
-  function selectItem(id) { setSelection({ kind: 'item', id }); }
-  function selectPath(id) { setSelection({ kind: 'path', id }); }
-  function clearSelection() { setSelection(null); }
+  function selectItem(id) { setSelection([{ kind: 'item', id }]); }
+  function selectPath(id) { setSelection([{ kind: 'path', id }]); }
+  function clearSelection() { setSelection([]); }
+  function toggleSelection(kind, id) {
+    if (isSelected(kind, id)) {
+      setSelection(state.selection.filter(s => !(s.kind === kind && s.id === id)));
+    } else {
+      setSelection([...state.selection, { kind, id }]);
+    }
+  }
+  function selectAll() {
+    const all = [
+      ...state.items.map(i => ({ kind: 'item', id: i.id })),
+      ...state.paths.map(p => ({ kind: 'path', id: p.id }))
+    ];
+    setSelection(all);
+  }
 
   function deleteSelection() {
-    if (!state.selection) return;
-    if (state.selection.kind === 'item') {
-      const id = state.selection.id;
-      // Detach (but keep) arrows linked to this item — they collapse to a fixed pos
-      for (const p of state.paths) {
-        if (p.type === 'arrow' && (p.fromId === id || p.toId === id)) {
-          const e = computeArrowEndpoints(p);
-          p.x1 = e.x1; p.y1 = e.y1; p.x2 = e.x2; p.y2 = e.y2;
-          if (p.fromId === id) p.fromId = null;
-          if (p.toId   === id) p.toId   = null;
-        }
+    if (!state.selection.length) return;
+    const itemIds = new Set(state.selection.filter(s => s.kind === 'item').map(s => s.id));
+    const pathIds = new Set(state.selection.filter(s => s.kind === 'path').map(s => s.id));
+    // Revoke blob URLs on removed items
+    for (const it of state.items) {
+      if (itemIds.has(it.id) && it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) {
+        try { URL.revokeObjectURL(it.src); } catch (e) {}
       }
-      state.items = state.items.filter(i => i.id !== id);
-    } else {
-      state.paths = state.paths.filter(p => p.id !== state.selection.id);
     }
-    state.selection = null;
+    // Detach (don't delete) arrows linked to deleted items
+    for (const p of state.paths) {
+      if (p.type === 'arrow' && (itemIds.has(p.fromId) || itemIds.has(p.toId))) {
+        if (pathIds.has(p.id)) continue;
+        const e = computeArrowEndpoints(p);
+        p.x1 = e.x1; p.y1 = e.y1; p.x2 = e.x2; p.y2 = e.y2;
+        if (itemIds.has(p.fromId)) p.fromId = null;
+        if (itemIds.has(p.toId))   p.toId   = null;
+      }
+    }
+    state.items = state.items.filter(i => !itemIds.has(i.id));
+    state.paths = state.paths.filter(p => !pathIds.has(p.id));
+    state.selection = [];
     renderAll();
     commitHistory();
     save();
   }
+
+  /* ---------- Z-order ---------- */
+  function zOrder(direction) {
+    const ids = new Set(state.selection.filter(s => s.kind === 'item').map(s => s.id));
+    if (!ids.size) return;
+    if (direction === 'front') {
+      const sel = state.items.filter(i => ids.has(i.id));
+      const others = state.items.filter(i => !ids.has(i.id));
+      state.items = [...others, ...sel];
+    } else if (direction === 'back') {
+      const sel = state.items.filter(i => ids.has(i.id));
+      const others = state.items.filter(i => !ids.has(i.id));
+      state.items = [...sel, ...others];
+    } else if (direction === 'forward') {
+      // Move each selected item up by one position (where possible)
+      for (let i = state.items.length - 2; i >= 0; i--) {
+        if (ids.has(state.items[i].id) && !ids.has(state.items[i+1].id)) {
+          [state.items[i], state.items[i+1]] = [state.items[i+1], state.items[i]];
+        }
+      }
+    } else if (direction === 'backward') {
+      for (let i = 1; i < state.items.length; i++) {
+        if (ids.has(state.items[i].id) && !ids.has(state.items[i-1].id)) {
+          [state.items[i], state.items[i-1]] = [state.items[i-1], state.items[i]];
+        }
+      }
+    }
+    renderAll();
+    commitHistory();
+    save();
+  }
+
+  /* ---------- Clipboard ---------- */
+  function buildClipboardFromSelection() {
+    const itemIds = new Set(state.selection.filter(s => s.kind === 'item').map(s => s.id));
+    const pathIds = new Set(state.selection.filter(s => s.kind === 'path').map(s => s.id));
+    const items = state.items.filter(i => itemIds.has(i.id)).map(i => JSON.parse(JSON.stringify(i)));
+    const paths = state.paths.filter(p => {
+      if (pathIds.has(p.id)) return true;
+      if (p.type === 'arrow' && p.fromId != null && p.toId != null && itemIds.has(p.fromId) && itemIds.has(p.toId)) return true;
+      return false;
+    }).map(p => JSON.parse(JSON.stringify(p)));
+    return { items, paths };
+  }
+  function copySelection() {
+    if (!state.selection.length) return;
+    clipboard = buildClipboardFromSelection();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(JSON.stringify({ __wb: true, ...clipboard })).catch(() => {});
+      }
+    } catch (e) {}
+    showToast('Copied');
+  }
+  function cutSelection() {
+    if (!state.selection.length) return;
+    clipboard = buildClipboardFromSelection();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(JSON.stringify({ __wb: true, ...clipboard })).catch(() => {});
+      }
+    } catch (e) {}
+    deleteSelection();
+    showToast('Cut');
+  }
+  function pasteAt(data, dx, dy) {
+    if (!data || !data.items) return false;
+    const idMap = new Map();
+    const newItems = data.items.map(it => {
+      const nid = state.nextId++;
+      idMap.set(it.id, nid);
+      return { ...JSON.parse(JSON.stringify(it)), id: nid, x: it.x + dx, y: it.y + dy };
+    });
+    const newPaths = (data.paths || []).map(p => {
+      const np = JSON.parse(JSON.stringify(p));
+      np.id = state.nextId++;
+      if (np.type === 'arrow') {
+        np.fromId = np.fromId != null ? (idMap.get(np.fromId) ?? null) : null;
+        np.toId   = np.toId   != null ? (idMap.get(np.toId)   ?? null) : null;
+        if (np.fromId == null) { np.x1 = (np.x1 || 0) + dx; np.y1 = (np.y1 || 0) + dy; }
+        if (np.toId == null)   { np.x2 = (np.x2 || 0) + dx; np.y2 = (np.y2 || 0) + dy; }
+      } else if (np.type === 'pen' && Array.isArray(np.points)) {
+        np.points = np.points.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
+      }
+      return np;
+    });
+    state.items.push(...newItems);
+    state.paths.push(...newPaths);
+    renderAll();
+    setSelection([
+      ...newItems.map(i => ({ kind: 'item', id: i.id })),
+      ...newPaths.map(p => ({ kind: 'path', id: p.id }))
+    ]);
+    commitHistory();
+    save();
+    return true;
+  }
+  function paste() {
+    const apply = (data) => {
+      if (!pasteAt(data, 20, 20)) showToast('Nothing to paste', 'danger');
+      else showToast('Pasted');
+    };
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(text => {
+        try {
+          const obj = JSON.parse(text);
+          if (obj && obj.__wb && Array.isArray(obj.items)) { apply(obj); return; }
+        } catch (e) {}
+        apply(clipboard);
+      }).catch(() => apply(clipboard));
+    } else {
+      apply(clipboard);
+    }
+  }
+  function duplicate() {
+    if (!state.selection.length) return;
+    const data = buildClipboardFromSelection();
+    pasteAt(data, 20, 20);
+    showToast('Duplicated');
+  }
+
+  /* ---------- Snap & guides ---------- */
+  function computeSnap(x, y, w, h, ignoreIds) {
+    let bestX = { delta: Infinity, snap: x, guide: null };
+    let bestY = { delta: Infinity, snap: y, guide: null };
+    // Grid snap (left/top edge)
+    const gridX = Math.round(x / GRID) * GRID;
+    if (Math.abs(gridX - x) < SNAP_THRESH && Math.abs(gridX - x) < bestX.delta) {
+      bestX = { delta: Math.abs(gridX - x), snap: gridX, guide: null };
+    }
+    const gridY = Math.round(y / GRID) * GRID;
+    if (Math.abs(gridY - y) < SNAP_THRESH && Math.abs(gridY - y) < bestY.delta) {
+      bestY = { delta: Math.abs(gridY - y), snap: gridY, guide: null };
+    }
+    // Item edge snap
+    for (const other of state.items) {
+      if (ignoreIds.has(other.id)) continue;
+      const myL = x, myC = x + w/2, myR = x + w;
+      const oL = other.x, oC = other.x + other.w/2, oR = other.x + other.w;
+      const xPairs = [
+        [myL, oL, oL,           oL],
+        [myC, oC, oC - w/2,     oC],
+        [myR, oR, oR - w,       oR],
+        [myL, oR, oR,           oR],
+        [myR, oL, oL - w,       oL]
+      ];
+      for (const [from, to, snapX, guideX] of xPairs) {
+        const d = Math.abs(from - to);
+        if (d < SNAP_THRESH && d < bestX.delta) {
+          bestX = { delta: d, snap: snapX, guide: { axis: 'v', x: guideX, other } };
+        }
+      }
+      const myT = y, myM = y + h/2, myB = y + h;
+      const oT = other.y, oM = other.y + other.h/2, oB = other.y + other.h;
+      const yPairs = [
+        [myT, oT, oT,           oT],
+        [myM, oM, oM - h/2,     oM],
+        [myB, oB, oB - h,       oB],
+        [myT, oB, oB,           oB],
+        [myB, oT, oT - h,       oT]
+      ];
+      for (const [from, to, snapY, guideY] of yPairs) {
+        const d = Math.abs(from - to);
+        if (d < SNAP_THRESH && d < bestY.delta) {
+          bestY = { delta: d, snap: snapY, guide: { axis: 'h', y: guideY, other } };
+        }
+      }
+    }
+    return {
+      x: bestX.snap, y: bestY.snap,
+      guides: [bestX.guide, bestY.guide].filter(Boolean)
+    };
+  }
+  function showGuides(guides, movedRect) {
+    guidesLayer.innerHTML = '';
+    for (const g of guides) {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      if (g.axis === 'v') {
+        const minY = Math.min(g.other.y, movedRect.y) - 40;
+        const maxY = Math.max(g.other.y + g.other.h, movedRect.y + movedRect.h) + 40;
+        line.setAttribute('x1', g.x + OFF); line.setAttribute('y1', minY + OFF);
+        line.setAttribute('x2', g.x + OFF); line.setAttribute('y2', maxY + OFF);
+      } else {
+        const minX = Math.min(g.other.x, movedRect.x) - 40;
+        const maxX = Math.max(g.other.x + g.other.w, movedRect.x + movedRect.w) + 40;
+        line.setAttribute('x1', minX + OFF); line.setAttribute('y1', g.y + OFF);
+        line.setAttribute('x2', maxX + OFF); line.setAttribute('y2', g.y + OFF);
+      }
+      line.setAttribute('stroke', '#e87268');
+      line.setAttribute('stroke-width', 1);
+      line.setAttribute('stroke-dasharray', '5 3');
+      guidesLayer.appendChild(line);
+    }
+  }
+  function clearGuides() { guidesLayer.innerHTML = ''; }
 
   /* ---------- Tools ---------- */
   function setTool(tool) {
@@ -931,15 +1292,20 @@
     colorsEl.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
     sw.classList.add('active');
     state.color = sw.dataset.color;
-    if (state.selection && state.selection.kind === 'item') {
-      const it = getItemById(state.selection.id);
-      if (it && (it.type === 'sticky' || it.type === 'text' || it.type === 'rect')) {
-        it.color = state.color;
-        renderAll(); commitHistory(); save();
+    if (state.selection.length) {
+      let touched = false;
+      for (const s of state.selection) {
+        if (s.kind === 'item') {
+          const it = getItemById(s.id);
+          if (it && (it.type === 'sticky' || it.type === 'text' || it.type === 'rect')) {
+            it.color = state.color; touched = true;
+          }
+        } else if (s.kind === 'path') {
+          const p = state.paths.find(x => x.id === s.id);
+          if (p) { p.color = state.color; touched = true; }
+        }
       }
-    } else if (state.selection && state.selection.kind === 'path') {
-      const p = state.paths.find(x => x.id === state.selection.id);
-      if (p) { p.color = state.color; renderAll(); commitHistory(); save(); }
+      if (touched) { renderAll(); commitHistory(); save(); }
     }
     colorsEl.classList.remove('open');
   });
@@ -949,15 +1315,20 @@
     return new Promise((res, rej) => {
       const r = new FileReader();
       r.onload = () => res(r.result);
-      r.onerror = rej;
+      r.onerror = (err) => { console.warn('File read error', err); rej(err); };
       r.readAsDataURL(file);
     });
   }
   async function addMediaItem(type, file, center) {
     let src;
     const maxBytesForDataURL = type === 'image' ? 4*1024*1024 : 1*1024*1024;
-    if (file.size <= maxBytesForDataURL) src = await readFileAsDataURL(file);
-    else src = URL.createObjectURL(file);
+    try {
+      if (file.size <= maxBytesForDataURL) src = await readFileAsDataURL(file);
+      else src = URL.createObjectURL(file);
+    } catch (e) {
+      showToast('Could not read file', 'danger');
+      return;
+    }
     const dims = type === 'audio' ? { w: 280, h: 60 }
                : type === 'video' ? { w: 360, h: 220 }
                : { w: 280, h: 200 };
@@ -972,21 +1343,81 @@
   document.getElementById('fileVideo').addEventListener('change', async (e) => { if (e.target.files[0]) { await addMediaItem('video', e.target.files[0], viewCenterWorld()); e.target.value = ''; } });
   document.getElementById('fileAudio').addEventListener('change', async (e) => { if (e.target.files[0]) { await addMediaItem('audio', e.target.files[0], viewCenterWorld()); e.target.value = ''; } });
 
-  /* ---------- Pointer interactions ---------- */
+  /* ---------- Pointer interactions (handles mouse + touch + pen) ---------- */
+  const pointers = new Map();
+  let pinchStart = null;
   let drag = null;
   let spaceDown = false;
   let arrowDraft = null;
   let penDraft = null;
+  let marquee = null;
+  let lastArrowTarget = null;
 
-  viewport.addEventListener('mousedown', (e) => {
+  viewport.addEventListener('pointerdown', (e) => {
+    // Don't capture pointers on toolbar / popout / handles UI
+    if (e.target.closest('.toolbar') || e.target.closest('.colors') || e.target.closest('.help')) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // hide context menu on any pointerdown
+    hideContextMenu();
+
+    if (pointers.size === 2) {
+      cancelDraftsAndDrag();
+      const [a, b] = Array.from(pointers.values());
+      pinchStart = {
+        dist: Math.hypot(a.x - b.x, a.y - b.y),
+        midX: (a.x + b.x) / 2, midY: (a.y + b.y) / 2,
+        scale: state.view.scale, vx: state.view.x, vy: state.view.y
+      };
+      return;
+    }
+    if (pointers.size > 2) return;
+
+    handleSinglePointerDown(e);
+  });
+
+  window.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2 && pinchStart) {
+      const [a, b] = Array.from(pointers.values());
+      const newDist = Math.hypot(a.x - b.x, a.y - b.y);
+      const newMidX = (a.x + b.x) / 2, newMidY = (a.y + b.y) / 2;
+      const factor = newDist / pinchStart.dist;
+      const newScale = Math.min(4, Math.max(0.2, pinchStart.scale * factor));
+      const r = viewport.getBoundingClientRect();
+      const lx0 = pinchStart.midX - r.left, ly0 = pinchStart.midY - r.top;
+      const wx = (lx0 - pinchStart.vx) / pinchStart.scale;
+      const wy = (ly0 - pinchStart.vy) / pinchStart.scale;
+      state.view.scale = newScale;
+      state.view.x = (newMidX - r.left) - wx * newScale;
+      state.view.y = (newMidY - r.top)  - wy * newScale;
+      applyView();
+      return;
+    }
+    if (pointers.size === 1) handleSinglePointerMove(e);
+  });
+
+  window.addEventListener('pointerup', (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchStart = null;
+    if (pointers.size === 0) handleSinglePointerUp(e);
+  });
+  window.addEventListener('pointercancel', (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchStart = null;
+    if (pointers.size === 0) handleSinglePointerUp(e);
+  });
+
+  function handleSinglePointerDown(e) {
+    // Space-pan or middle-click
     if (e.button === 1 || e.button === 2 || spaceDown || state.tool === 'pan') {
       drag = { mode: 'pan', sx: e.clientX, sy: e.clientY, vx: state.view.x, vy: state.view.y };
       viewport.classList.add('panning');
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       return;
     }
 
-    // path-handle (arrow endpoint) has its own mousedown that sets `drag`
     if (e.target.classList && e.target.classList.contains('path-handle')) return;
 
     const handleEl = e.target.closest('.handle');
@@ -997,24 +1428,37 @@
       drag = { mode: 'resize', id: it.id, handle: handleEl.dataset.handle,
                sx: e.clientX, sy: e.clientY,
                ox: it.x, oy: it.y, ow: it.w, oh: it.h, changed: false };
-      e.preventDefault();
       return;
     }
 
     if (itemEl) {
       const id = Number(itemEl.dataset.id);
       const it = getItemById(id);
+      if (!it) return;
       if (state.tool === 'select') {
         if (itemEl.getAttribute('contenteditable') === 'true') return;
-        selectItem(id);
-        drag = { mode: 'move', id, sx: e.clientX, sy: e.clientY, ox: it.x, oy: it.y, changed: false };
-        e.preventDefault();
+        if (e.shiftKey) {
+          toggleSelection('item', id);
+          // Don't start drag if just toggled — wait for next click
+          if (!isSelected('item', id)) return;
+        } else if (!isSelected('item', id)) {
+          selectItem(id);
+        }
+        // Build group-drag state from all selected items
+        const startPositions = state.selection
+          .filter(s => s.kind === 'item')
+          .map(s => {
+            const i = getItemById(s.id);
+            return i ? { id: i.id, ox: i.x, oy: i.y, w: i.w, h: i.h } : null;
+          })
+          .filter(Boolean);
+        if (!startPositions.length) startPositions.push({ id: it.id, ox: it.x, oy: it.y, w: it.w, h: it.h });
+        drag = { mode: 'move', sx: e.clientX, sy: e.clientY, startPositions, changed: false };
       } else if (state.tool === 'arrow') {
         const wp = screenToWorld(e.clientX, e.clientY);
         arrowDraft = { fromId: id, x1: wp.x, y1: wp.y, x2: wp.x, y2: wp.y };
         drag = { mode: 'arrow' };
         renderArrowDraft();
-        e.preventDefault();
       }
       return;
     }
@@ -1022,9 +1466,11 @@
     const wp = screenToWorld(e.clientX, e.clientY);
 
     if (state.tool === 'select') {
-      clearSelection();
-      drag = { mode: 'pan', sx: e.clientX, sy: e.clientY, vx: state.view.x, vy: state.view.y };
-      viewport.classList.add('panning');
+      if (!e.shiftKey) clearSelection();
+      // Start marquee
+      marquee = { sx: e.clientX, sy: e.clientY, cx: e.clientX, cy: e.clientY, additive: e.shiftKey, baseline: state.selection.slice() };
+      drag = { mode: 'marquee' };
+      updateMarqueeEl();
       return;
     }
     if (state.tool === 'sticky') {
@@ -1061,14 +1507,14 @@
     }
     if (state.tool === 'pen') {
       penDraft = { id: state.nextId++, type: 'pen', points: [wp],
-                   color: state.color === '#fff3a3' ? '#2a0f0a' : state.color, width: 3 };
+                   color: (state.color === '#fff3a3' || state.color === '#ffffff') ? '#2a0f0a' : state.color, width: 3 };
       drag = { mode: 'pen' };
       renderPenDraft();
       return;
     }
-  });
+  }
 
-  window.addEventListener('mousemove', (e) => {
+  function handleSinglePointerMove(e) {
     if (!drag) return;
     if (drag.mode === 'pan') {
       state.view.x = drag.vx + (e.clientX - drag.sx);
@@ -1077,16 +1523,39 @@
       return;
     }
     if (drag.mode === 'move') {
-      const dx = (e.clientX - drag.sx) / state.view.scale;
-      const dy = (e.clientY - drag.sy) / state.view.scale;
-      const it = getItemById(drag.id);
-      if (it) {
-        if (Math.abs(dx) + Math.abs(dy) > 0.5) drag.changed = true;
-        it.x = drag.ox + dx;
-        it.y = drag.oy + dy;
-        updateItemElPos(it);
-        updateAttachedPathsFor(it.id);
+      let dx = (e.clientX - drag.sx) / state.view.scale;
+      let dy = (e.clientY - drag.sy) / state.view.scale;
+      // Shift constrains to dominant axis
+      if (e.shiftKey) {
+        if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0;
       }
+      // Snap (using first item as reference)
+      if (!e.altKey && drag.startPositions.length) {
+        const primary = drag.startPositions[0];
+        const ignoreIds = new Set(drag.startPositions.map(p => p.id));
+        const rawX = primary.ox + dx;
+        const rawY = primary.oy + dy;
+        const snapped = computeSnap(rawX, rawY, primary.w, primary.h, ignoreIds);
+        dx = snapped.x - primary.ox;
+        dy = snapped.y - primary.oy;
+        if (snapped.guides.length) {
+          showGuides(snapped.guides, { x: snapped.x, y: snapped.y, w: primary.w, h: primary.h });
+        } else {
+          clearGuides();
+        }
+      } else {
+        clearGuides();
+      }
+      for (const sp of drag.startPositions) {
+        const it = getItemById(sp.id);
+        if (it) {
+          it.x = sp.ox + dx;
+          it.y = sp.oy + dy;
+          updateItemElPos(it);
+          updateAttachedPathsFor(it.id);
+        }
+      }
+      if (Math.abs(dx) + Math.abs(dy) > 0.5) drag.changed = true;
       return;
     }
     if (drag.mode === 'resize') {
@@ -1100,6 +1569,16 @@
       if (handle === 'bl') { nw = Math.max(40, ow - dx); nh = Math.max(30, oh + dy); nx = ox + (ow - nw); }
       if (handle === 'tr') { nw = Math.max(40, ow + dx); nh = Math.max(30, oh - dy); ny = oy + (oh - nh); }
       if (handle === 'tl') { nw = Math.max(40, ow - dx); nh = Math.max(30, oh - dy); nx = ox + (ow - nw); ny = oy + (oh - nh); }
+      // Shift: maintain aspect ratio
+      if (e.shiftKey && ow && oh) {
+        const aspect = ow / oh;
+        const aw = Math.max(nw, nh * aspect);
+        const ah = aw / aspect;
+        if (handle === 'br') { nw = aw; nh = ah; }
+        if (handle === 'bl') { const oldNW = nw; nw = aw; nh = ah; nx = ox + (ow - nw); }
+        if (handle === 'tr') { nw = aw; nh = ah; ny = oy + (oh - nh); }
+        if (handle === 'tl') { nw = aw; nh = ah; nx = ox + (ow - nw); ny = oy + (oh - nh); }
+      }
       it.x = nx; it.y = ny; it.w = nw; it.h = nh;
       drag.changed = true;
       updateItemElPos(it);
@@ -1108,8 +1587,33 @@
     }
     if (drag.mode === 'arrow' && arrowDraft) {
       const wp = screenToWorld(e.clientX, e.clientY);
-      arrowDraft.x2 = wp.x; arrowDraft.y2 = wp.y;
+      let x2 = wp.x, y2 = wp.y;
+      // Shift: snap to 15°
+      if (e.shiftKey) {
+        const dx = x2 - arrowDraft.x1, dy = y2 - arrowDraft.y1;
+        const ang = Math.atan2(dy, dx);
+        const step = Math.PI / 12; // 15°
+        const snapped = Math.round(ang / step) * step;
+        const r = Math.hypot(dx, dy);
+        x2 = arrowDraft.x1 + Math.cos(snapped) * r;
+        y2 = arrowDraft.y1 + Math.sin(snapped) * r;
+      }
+      arrowDraft.x2 = x2; arrowDraft.y2 = y2;
       renderArrowDraft();
+      // Highlight target box
+      const overItem = itemAt(x2, y2);
+      const targetId = (overItem && overItem.id !== arrowDraft.fromId) ? overItem.id : null;
+      if (targetId !== lastArrowTarget) {
+        if (lastArrowTarget != null) {
+          const prev = itemsLayer.querySelector(`.item[data-id="${lastArrowTarget}"]`);
+          if (prev) prev.classList.remove('arrow-target');
+        }
+        if (targetId != null) {
+          const cur = itemsLayer.querySelector(`.item[data-id="${targetId}"]`);
+          if (cur) cur.classList.add('arrow-target');
+        }
+        lastArrowTarget = targetId;
+      }
       return;
     }
     if (drag.mode === 'pen' && penDraft) {
@@ -1137,11 +1641,17 @@
       updatePathEl(p);
       return;
     }
-  });
+    if (drag.mode === 'marquee' && marquee) {
+      marquee.cx = e.clientX; marquee.cy = e.clientY;
+      updateMarqueeEl();
+      computeMarqueeSelection();
+      return;
+    }
+  }
 
-  window.addEventListener('mouseup', () => {
+  function handleSinglePointerUp(e) {
     if (!drag) return;
-    if (drag.mode === 'move' && drag.changed)     { commitHistory(); save(); }
+    if (drag.mode === 'move')     { clearGuides(); if (drag.changed) { commitHistory(); save(); } }
     if (drag.mode === 'resize' && drag.changed)   { commitHistory(); save(); }
     if (drag.mode === 'arrowEnd' && drag.changed) { commitHistory(); save(); }
     if (drag.mode === 'arrow' && arrowDraft) {
@@ -1152,11 +1662,18 @@
         const toId = (overItem && overItem.id !== arrowDraft.fromId) ? overItem.id : null;
         const p = { id: state.nextId++, type: 'arrow',
                     fromId: arrowDraft.fromId || null,
-                    toId: toId,
-                    x1: arrowDraft.x1, y1: arrowDraft.y1, x2: arrowDraft.x2, y2: arrowDraft.y2,
+                    toId,
+                    x1: arrowDraft.x1, y1: arrowDraft.y1,
+                    x2: arrowDraft.x2, y2: arrowDraft.y2,
                     color: '#2a0f0a', width: 2 };
         state.paths.push(p);
         commitHistory(); save();
+      }
+      // Clear target highlight
+      if (lastArrowTarget != null) {
+        const prev = itemsLayer.querySelector(`.item[data-id="${lastArrowTarget}"]`);
+        if (prev) prev.classList.remove('arrow-target');
+        lastArrowTarget = null;
       }
       arrowDraft = null;
       removeDraftEl();
@@ -1169,11 +1686,75 @@
       removeDraftEl();
       renderAll();
     }
+    if (drag.mode === 'marquee') {
+      marquee = null;
+      updateMarqueeEl();
+    }
     drag = null;
     viewport.classList.remove('panning');
-  });
+  }
 
-  /* ---------- Draft preview SVG (during arrow / pen drag) ---------- */
+  function cancelDraftsAndDrag() {
+    if (arrowDraft) {
+      arrowDraft = null;
+      removeDraftEl();
+      if (lastArrowTarget != null) {
+        const prev = itemsLayer.querySelector(`.item[data-id="${lastArrowTarget}"]`);
+        if (prev) prev.classList.remove('arrow-target');
+        lastArrowTarget = null;
+      }
+    }
+    if (penDraft) { penDraft = null; removeDraftEl(); }
+    if (marquee) { marquee = null; updateMarqueeEl(); }
+    clearGuides();
+    drag = null;
+    viewport.classList.remove('panning');
+  }
+
+  /* Marquee element */
+  function updateMarqueeEl() {
+    let el = document.getElementById('marqueeEl');
+    if (!marquee) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'marqueeEl';
+      el.className = 'marquee';
+      viewport.appendChild(el);
+    }
+    const r = viewport.getBoundingClientRect();
+    const x = Math.min(marquee.sx, marquee.cx) - r.left;
+    const y = Math.min(marquee.sy, marquee.cy) - r.top;
+    const w = Math.abs(marquee.cx - marquee.sx);
+    const h = Math.abs(marquee.cy - marquee.sy);
+    el.style.left = x + 'px'; el.style.top = y + 'px';
+    el.style.width = w + 'px'; el.style.height = h + 'px';
+  }
+  function computeMarqueeSelection() {
+    if (!marquee) return;
+    const wp1 = screenToWorld(Math.min(marquee.sx, marquee.cx), Math.min(marquee.sy, marquee.cy));
+    const wp2 = screenToWorld(Math.max(marquee.sx, marquee.cx), Math.max(marquee.sy, marquee.cy));
+    const out = marquee.additive ? marquee.baseline.slice() : [];
+    const has = (kind, id) => out.some(s => s.kind === kind && s.id === id);
+    for (const it of state.items) {
+      const intersects = (it.x + it.w >= wp1.x) && (it.x <= wp2.x) &&
+                         (it.y + it.h >= wp1.y) && (it.y <= wp2.y);
+      if (intersects && !has('item', it.id)) out.push({ kind: 'item', id: it.id });
+    }
+    for (const p of state.paths) {
+      let inside = false;
+      if (p.type === 'arrow') {
+        const e = computeArrowEndpoints(p);
+        const inRect = (x, y) => x >= wp1.x && x <= wp2.x && y >= wp1.y && y <= wp2.y;
+        inside = inRect(e.x1, e.y1) || inRect(e.x2, e.y2);
+      } else if (p.type === 'pen' && Array.isArray(p.points)) {
+        inside = p.points.some(pt => pt.x >= wp1.x && pt.x <= wp2.x && pt.y >= wp1.y && pt.y <= wp2.y);
+      }
+      if (inside && !has('path', p.id)) out.push({ kind: 'path', id: p.id });
+    }
+    setSelection(out);
+  }
+
+  /* ---------- Draft preview ---------- */
   function ensureDraftEl() {
     let g = document.getElementById('draft');
     if (!g) { g = document.createElementNS('http://www.w3.org/2000/svg', 'g'); g.id = 'draft'; svg.appendChild(g); }
@@ -1211,10 +1792,14 @@
     g.appendChild(path);
   }
 
-  /* ---------- Wheel zoom ---------- */
+  /* ---------- Wheel zoom (trackpad-aware) ---------- */
   viewport.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const factor = Math.exp(-e.deltaY * 0.0015);
+    if (e.cancelable) e.preventDefault();
+    let delta = e.deltaY;
+    if (e.deltaMode === 1) delta *= 16;
+    else if (e.deltaMode === 2) delta *= viewport.clientHeight || 600;
+    delta = Math.max(-100, Math.min(100, delta));
+    const factor = Math.exp(-delta * 0.0015);
     zoomAt(e.clientX, e.clientY, state.view.scale * factor);
   }, { passive: false });
 
@@ -1273,6 +1858,59 @@
     el.addEventListener('keydown', onKey);
   }
 
+  /* ---------- Context menu ---------- */
+  function showContextMenu(clientX, clientY) {
+    // Update visibility of z-order items based on selection
+    const hasItem = state.selection.some(s => s.kind === 'item');
+    contextMenuEl.querySelectorAll('[data-needs-item]').forEach(b => {
+      b.style.display = hasItem ? '' : 'none';
+    });
+    contextMenuEl.classList.add('open');
+    // Clamp position to viewport
+    const r = contextMenuEl.getBoundingClientRect();
+    let x = clientX, y = clientY;
+    if (x + r.width  > window.innerWidth)  x = window.innerWidth - r.width  - 8;
+    if (y + r.height > window.innerHeight) y = window.innerHeight - r.height - 8;
+    contextMenuEl.style.left = x + 'px';
+    contextMenuEl.style.top  = y + 'px';
+  }
+  function hideContextMenu() { contextMenuEl.classList.remove('open'); }
+
+  viewport.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const itemEl = e.target.closest('.item');
+    if (itemEl) {
+      const id = Number(itemEl.dataset.id);
+      if (!isSelected('item', id)) selectItem(id);
+      showContextMenu(e.clientX, e.clientY);
+    } else if (e.target.closest('.svg-layer .hit')) {
+      // path right-click — selection handled via existing pointerdown; show menu
+      showContextMenu(e.clientX, e.clientY);
+    } else {
+      // empty canvas — show paste-only menu if clipboard
+      if (clipboard) showContextMenu(e.clientX, e.clientY);
+    }
+  });
+  contextMenuEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    const a = btn.dataset.action;
+    hideContextMenu();
+    if (a === 'duplicate') duplicate();
+    else if (a === 'copy') copySelection();
+    else if (a === 'cut') cutSelection();
+    else if (a === 'paste') paste();
+    else if (a === 'front') zOrder('front');
+    else if (a === 'back') zOrder('back');
+    else if (a === 'forward') zOrder('forward');
+    else if (a === 'backward') zOrder('backward');
+    else if (a === 'delete') deleteSelection();
+  });
+  window.addEventListener('pointerdown', (e) => {
+    if (!contextMenuEl.classList.contains('open')) return;
+    if (!e.target.closest('.context-menu')) hideContextMenu();
+  }, true);
+
   /* ---------- Keyboard ---------- */
   window.addEventListener('keydown', (e) => {
     const tgt = e.target;
@@ -1281,20 +1919,36 @@
       if (e.key === 'Escape') tgt.blur();
       return;
     }
-    // Undo / redo (Cmd or Ctrl)
     const mod = e.ctrlKey || e.metaKey;
+
+    if (mod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selectAll(); return; }
     if (mod && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); return; }
     if (mod && ((e.shiftKey && (e.key === 'z' || e.key === 'Z')) || e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+    if (mod && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); copySelection(); return; }
+    if (mod && (e.key === 'x' || e.key === 'X')) { e.preventDefault(); cutSelection(); return; }
+    if (mod && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); paste(); return; }
+    if (mod && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); duplicate(); return; }
+    if (mod && e.shiftKey && e.key === ']') { e.preventDefault(); zOrder('front'); return; }
+    if (mod && e.shiftKey && e.key === '[') { e.preventDefault(); zOrder('back'); return; }
+    if (mod && e.key === ']') { e.preventDefault(); zOrder('forward'); return; }
+    if (mod && e.key === '[') { e.preventDefault(); zOrder('backward'); return; }
 
     if (e.code === 'Space') { spaceDown = true; viewport.classList.add('tool-pan'); }
-    if (e.key === 'v' || e.key === 'V') setTool('select');
-    if (e.key === 'h' || e.key === 'H') setTool('pan');
-    if (e.key === 'n' || e.key === 'N') setTool('sticky');
-    if (e.key === 't' || e.key === 'T') setTool('text');
-    if (e.key === 'r' || e.key === 'R') setTool('rect');
-    if (e.key === 'a' || e.key === 'A') setTool('arrow');
-    if (e.key === 'p' || e.key === 'P') setTool('pen');
-    if (e.key === 'Delete' || e.key === 'Backspace') { if (state.selection) { e.preventDefault(); deleteSelection(); } }
+    if (e.key === 'Escape') {
+      if (contextMenuEl.classList.contains('open')) { hideContextMenu(); return; }
+      if (arrowDraft || penDraft || marquee) { cancelDraftsAndDrag(); setTool('select'); return; }
+      if (state.selection.length) { clearSelection(); return; }
+    }
+    if (!mod) {
+      if (e.key === 'v' || e.key === 'V') setTool('select');
+      if (e.key === 'h' || e.key === 'H') setTool('pan');
+      if (e.key === 'n' || e.key === 'N') setTool('sticky');
+      if (e.key === 't' || e.key === 'T') setTool('text');
+      if (e.key === 'r' || e.key === 'R') setTool('rect');
+      if (e.key === 'a' || e.key === 'A') setTool('arrow');
+      if (e.key === 'p' || e.key === 'P') setTool('pen');
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') { if (state.selection.length) { e.preventDefault(); deleteSelection(); } }
     if ((e.key === '+' || e.key === '=') && mod) { e.preventDefault(); zoomAtCenter(state.view.scale * 1.2); }
     if (e.key === '-' && mod) { e.preventDefault(); zoomAtCenter(state.view.scale / 1.2); }
     if (e.key === '0' && mod) { e.preventDefault(); resetView(); }
@@ -1304,15 +1958,21 @@
   });
 
   /* ---------- Top bar buttons ---------- */
-  document.getElementById('zoomIn').addEventListener('click', () => zoomAtCenter(state.view.scale * 1.2));
-  document.getElementById('zoomOut').addEventListener('click', () => zoomAtCenter(state.view.scale / 1.2));
+  zoomInBtn.addEventListener('click', () => zoomAtCenter(state.view.scale * 1.2));
+  zoomOutBtn.addEventListener('click', () => zoomAtCenter(state.view.scale / 1.2));
   document.getElementById('zoomFit').addEventListener('click', resetView);
   undoBtn.addEventListener('click', undo);
   redoBtn.addEventListener('click', redo);
 
   document.getElementById('clearBtn').addEventListener('click', () => {
     if (!confirm('Clear the whole board? You can undo with Ctrl+Z.')) return;
-    state.items = []; state.paths = []; state.selection = null;
+    // Revoke blob urls
+    for (const it of state.items) {
+      if (it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) {
+        try { URL.revokeObjectURL(it.src); } catch (e) {}
+      }
+    }
+    state.items = []; state.paths = []; state.selection = [];
     renderAll(); commitHistory(); save();
     showToast('Board cleared');
   });
@@ -1333,21 +1993,28 @@
     try {
       const text = await file.text();
       const obj = JSON.parse(text);
+      if (!validateBoard(obj)) {
+        showToast('Invalid board file', 'danger');
+        e.target.value = '';
+        return;
+      }
       state.view  = obj.view  || state.view;
       state.items = obj.items || [];
       state.paths = obj.paths || [];
       state.nextId = obj.nextId || (state.items.length + state.paths.length + 1);
-      state.selection = null;
+      state.selection = [];
       renderAll(); commitHistory(); save();
       showToast('Imported');
-    } catch (err) { alert('Could not read that file: ' + err.message); }
+    } catch (err) {
+      console.warn('Import error', err);
+      showToast('Could not read file', 'danger');
+    }
     e.target.value = '';
   });
 
   document.getElementById('closeHelp').addEventListener('click', () => { document.getElementById('help').style.display = 'none'; });
 
-  /* ---------- Misc ---------- */
-  viewport.addEventListener('contextmenu', (e) => e.preventDefault());
+  /* Drag-drop files */
   viewport.addEventListener('dragover', (e) => { e.preventDefault(); });
   viewport.addEventListener('drop', async (e) => {
     e.preventDefault();
@@ -1360,27 +2027,39 @@
     }
   });
 
+  /* Toast */
   let toastTimer;
-  function showToast(msg) {
+  function showToast(msg, variant = '') {
     const t = document.getElementById('toast');
     t.textContent = msg;
+    t.classList.remove('danger');
+    if (variant === 'danger') t.classList.add('danger');
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 1400);
   }
 
   /* ---------- Test hook ---------- */
-  // Expose a tiny API so headless tests can drive the board
   window.__wb = {
-    state,
-    undo, redo,
-    computeArrowEndpoints,
-    snapshot,
-    commitHistory,
-    selectItem, selectPath, clearSelection,
+    state, get clipboard() { return clipboard; },
+    undo, redo, commitHistory, snapshot,
+    computeArrowEndpoints, computeSnap,
+    isSelected, setSelection, selectItem, selectPath, clearSelection, toggleSelection, selectAll,
     setTool, startEditing,
     renderAll, save,
-    seedBoard: () => { state.items = []; state.paths = []; state.nextId = 1; state.history = []; state.historyIndex = -1; seedBoard(); renderAll(); commitHistory(); }
+    copySelection, cutSelection, paste, duplicate,
+    zOrder, deleteSelection,
+    validateBoard,
+    showContextMenu, hideContextMenu,
+    pasteAt,
+    cancelDraftsAndDrag,
+    setClipboard: (c) => { clipboard = c; },
+    getDraft: () => ({ arrow: arrowDraft, pen: penDraft, marquee }),
+    seedBoard: () => {
+      state.items = []; state.paths = []; state.nextId = 1;
+      state.history = []; state.historyIndex = -1;
+      seedBoard(); renderAll(); commitHistory();
+    }
   };
 
   /* ---------- Boot ---------- */
