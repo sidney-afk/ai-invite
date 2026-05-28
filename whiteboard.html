@@ -360,6 +360,53 @@
   }
   .context-menu .sep { height: 1px; background: var(--line); margin: 4px 8px; }
 
+  /* Floating format bar (font size for sticky / text) */
+  .format-bar {
+    position: fixed;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 4px 6px;
+    box-shadow: 0 14px 30px -14px rgba(42, 15, 10, 0.4);
+    z-index: 28;
+    display: none;
+    align-items: center;
+    gap: 2px;
+    transform: translateX(-50%);
+    user-select: none;
+    white-space: nowrap;
+  }
+  .format-bar.open { display: inline-flex; }
+  .format-bar button {
+    border: none;
+    background: transparent;
+    height: 30px;
+    min-width: 30px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .format-bar button:hover { background: #faeeea; }
+  .format-bar button.small { font-size: 10px; }
+  .format-bar button.big { font-size: 16px; }
+  .format-bar .size {
+    font-size: 12px;
+    color: var(--ink-soft);
+    min-width: 42px;
+    text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .format-bar .sep {
+    width: 1px;
+    height: 20px;
+    background: var(--line);
+    margin: 0 4px;
+  }
+
   /* Help card */
   .help {
     position: absolute;
@@ -567,6 +614,15 @@
       <div class="toast" id="toast"></div>
     </div>
   </div>
+</div>
+
+<!-- Floating format bar for sticky / text font size -->
+<div class="format-bar" id="formatBar" role="toolbar" aria-label="Text formatting">
+  <button data-act="dec" class="small" title="Smaller text (Cmd+Shift+,)">A−</button>
+  <span class="size" id="fontSizeDisplay">16 px</span>
+  <button data-act="inc" class="big" title="Larger text (Cmd+Shift+.)">A+</button>
+  <span class="sep"></span>
+  <button data-act="reset" title="Reset to default">Reset</button>
 </div>
 
 <!-- Right-click context menu -->
@@ -908,6 +964,7 @@
     world.style.transform = `translate(${state.view.x}px, ${state.view.y}px) scale(${state.view.scale})`;
     zoomVal.textContent = Math.round(state.view.scale * 100) + '%';
     updateZoomButtons();
+    if (typeof positionFormatBar === 'function') positionFormatBar();
   }
   function screenToWorld(sx, sy) {
     const rect = viewport.getBoundingClientRect();
@@ -970,6 +1027,7 @@
     }
     if (it.type === 'sticky' || it.type === 'text') {
       el.textContent = it.text || '';
+      if (it.fontSize) el.style.fontSize = it.fontSize + 'px';
     } else if (it.type === 'image') {
       if (it.src) { const img = document.createElement('img'); img.src = it.src; img.alt = it.name || ''; el.appendChild(img); }
       else placeholderMedia(el, '(image not in this session)');
@@ -1140,6 +1198,9 @@
   function selectItem(id) { setSelection([{ kind: 'item', id }]); }
   function selectPath(id) { setSelection([{ kind: 'path', id }]); }
   function clearSelection() { setSelection([]); }
+  // Anything that changes selection should refresh the format bar
+  const _setSelectionOriginal = setSelection;
+  setSelection = function (arr) { _setSelectionOriginal(arr); refreshFormatBar(); };
   function toggleSelection(kind, id) {
     if (isSelected(kind, id)) {
       setSelection(state.selection.filter(s => !(s.kind === kind && s.id === id)));
@@ -1147,6 +1208,76 @@
       setSelection([...state.selection, { kind, id }]);
     }
   }
+  /* ---------- Format bar (sticky / text font size) ---------- */
+  const FONT_MIN = 8;
+  const FONT_MAX = 128;
+  const FONT_STEP = 2;
+  const formatBarEl = document.getElementById('formatBar');
+  const fontSizeDisplayEl = document.getElementById('fontSizeDisplay');
+  function defaultFontSize(type) { return type === 'sticky' ? 16 : 22; }
+  function getFontSize(it) { return it.fontSize || defaultFontSize(it.type); }
+  function formattableItems() {
+    return state.selection
+      .filter(s => s.kind === 'item')
+      .map(s => getItemById(s.id))
+      .filter(it => it && (it.type === 'sticky' || it.type === 'text'));
+  }
+  function refreshFormatBar() {
+    const items = formattableItems();
+    if (!items.length) { formatBarEl.classList.remove('open'); return; }
+    const sizes = new Set(items.map(getFontSize));
+    fontSizeDisplayEl.textContent = sizes.size === 1
+      ? items[0].fontSize ? items[0].fontSize + ' px' : (defaultFontSize(items[0].type) + ' px')
+      : 'mixed';
+    formatBarEl.classList.add('open');
+    positionFormatBar();
+  }
+  function positionFormatBar() {
+    if (!formatBarEl.classList.contains('open')) return;
+    const items = formattableItems();
+    if (!items.length) return;
+    // Anchor to the bounding box of all selected formattable items
+    const xs0 = Math.min(...items.map(i => i.x));
+    const xs1 = Math.max(...items.map(i => i.x + i.w));
+    const ys0 = Math.min(...items.map(i => i.y));
+    const r = viewport.getBoundingClientRect();
+    const cx = r.left + ((xs0 + xs1) / 2) * state.view.scale + state.view.x;
+    const ty = r.top  + ys0 * state.view.scale + state.view.y;
+    formatBarEl.style.left = cx + 'px';
+    formatBarEl.style.top  = (ty - 48) + 'px';
+  }
+  function changeFontSize(mode) {
+    // mode: 'inc' | 'dec' | 'reset' | number (absolute size)
+    const items = formattableItems();
+    if (!items.length) return;
+    let touched = false;
+    for (const it of items) {
+      const current = getFontSize(it);
+      let next;
+      if (mode === 'inc') next = Math.min(FONT_MAX, current + FONT_STEP);
+      else if (mode === 'dec') next = Math.max(FONT_MIN, current - FONT_STEP);
+      else if (mode === 'reset') next = null;
+      else if (typeof mode === 'number') next = Math.max(FONT_MIN, Math.min(FONT_MAX, mode));
+      else continue;
+      if (mode === 'reset') {
+        if (it.fontSize) { delete it.fontSize; touched = true; }
+      } else if (next !== current) {
+        it.fontSize = next;
+        touched = true;
+      }
+    }
+    if (!touched) return;
+    renderAll();
+    refreshFormatBar();
+    commitHistory();
+    save();
+  }
+  formatBarEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    changeFontSize(btn.dataset.act);
+  });
+
   function selectAll() {
     const all = [
       ...state.items.map(i => ({ kind: 'item', id: i.id })),
@@ -1726,6 +1857,7 @@
           updateAttachedPathsFor(it.id);
         }
       }
+      positionFormatBar();
       if (Math.abs(dx) + Math.abs(dy) > 0.5) drag.changed = true;
       return;
     }
@@ -1754,6 +1886,7 @@
       drag.changed = true;
       updateItemElPos(it);
       updateAttachedPathsFor(it.id);
+      positionFormatBar();
       return;
     }
     if (drag.mode === 'arrow' && arrowDraft) {
@@ -2099,6 +2232,8 @@
     if (mod && (e.key === 'x' || e.key === 'X')) { e.preventDefault(); cutSelection(); return; }
     if (mod && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); paste(); return; }
     if (mod && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); duplicate(); return; }
+    if (mod && e.shiftKey && (e.key === '.' || e.key === '>')) { e.preventDefault(); changeFontSize('inc'); return; }
+    if (mod && e.shiftKey && (e.key === ',' || e.key === '<')) { e.preventDefault(); changeFontSize('dec'); return; }
     if (mod && e.shiftKey && e.key === ']') { e.preventDefault(); zOrder('front'); return; }
     if (mod && e.shiftKey && e.key === '[') { e.preventDefault(); zOrder('back'); return; }
     if (mod && e.key === ']') { e.preventDefault(); zOrder('forward'); return; }
@@ -2308,6 +2443,7 @@
     getDraft: () => ({ arrow: arrowDraft, pen: penDraft, marquee }),
     idbGet, idbPut, idbDelete, idbKeys,
     load, buildExportData, readBakedData, bakeIntoPage, loadFromObject,
+    changeFontSize, getFontSize, refreshFormatBar,
     seedBoard: () => {
       state.items = []; state.paths = []; state.nextId = 1;
       state.history = []; state.historyIndex = -1;
