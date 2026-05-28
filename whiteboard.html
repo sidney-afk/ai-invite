@@ -427,6 +427,12 @@
 </head>
 <body>
 
+<!--
+  Baked-in board data. Used as the default view when a visitor has no
+  localStorage of their own. Replaced by the "Publish" button.
+-->
+<script id="board-data" type="application/json"></script>
+
 <div class="app">
   <header class="topbar">
     <a class="brand" href="index.html">
@@ -445,6 +451,10 @@
         <button id="zoomIn" aria-label="Zoom in">+</button>
         <button id="zoomFit" aria-label="Fit" title="Reset view">⤢</button>
       </div>
+      <button class="pill primary" id="bakeBtn" title="Bake the current board (with media) into a copy of whiteboard.html. Commit that file to make this view the default for anyone visiting the URL.">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v6"/><path d="M12 16v6"/><circle cx="12" cy="12" r="4"/></svg>
+        <span class="label">Publish</span>
+      </button>
       <button class="pill" id="exportBtn" title="Export board as JSON">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         <span class="label">Export</span>
@@ -741,25 +751,63 @@
       }
     }
   }
+  async function loadFromObject(obj) {
+    state.view = obj.view || state.view;
+    state.items = obj.items || [];
+    state.paths = obj.paths || [];
+    state.nextId = obj.nextId || (state.items.length + state.paths.length + 1);
+    // Re-hydrate media srcs from IndexedDB for items whose blob was stripped on save
+    await Promise.all(state.items.map(async (it) => {
+      if (it.assetId && !it.src) {
+        try {
+          const blob = await idbGet(it.assetId);
+          if (blob) it.src = URL.createObjectURL(blob);
+        } catch (e) {}
+      }
+      // For boards loaded straight from the baked <script> tag, media is
+      // inlined as dataURLs. Move those into IndexedDB so subsequent saves
+      // keep localStorage small and we can use a blob URL for the render.
+      if (!it.assetId && it.src && typeof it.src === 'string' && it.src.startsWith('data:')) {
+        try {
+          const blob = await (await fetch(it.src)).blob();
+          const assetId = 'a' + state.nextId++;
+          await idbPut(assetId, blob);
+          it.assetId = assetId;
+          it.src = URL.createObjectURL(blob);
+        } catch (e) {}
+      }
+    }));
+  }
+
+  function readBakedData() {
+    const el = document.getElementById('board-data');
+    if (!el) return null;
+    const txt = (el.textContent || '').trim();
+    if (!txt) return null;
+    try {
+      const obj = JSON.parse(txt);
+      if (validateBoard(obj)) return obj;
+    } catch (e) {}
+    return null;
+  }
+
   async function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) { seedBoard(); return; }
-      const obj = JSON.parse(raw);
-      if (!validateBoard(obj)) { seedBoard(); return; }
-      state.view = obj.view || state.view;
-      state.items = obj.items || [];
-      state.paths = obj.paths || [];
-      state.nextId = obj.nextId || (state.items.length + state.paths.length + 1);
-      // Re-hydrate media srcs from IndexedDB for items whose blob was stripped on save
-      await Promise.all(state.items.map(async (it) => {
-        if (it.assetId && !it.src) {
-          try {
-            const blob = await idbGet(it.assetId);
-            if (blob) it.src = URL.createObjectURL(blob);
-          } catch (e) { /* leave src null → placeholder shows */ }
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (validateBoard(obj)) {
+          await loadFromObject(obj);
+          return;
         }
-      }));
+      }
+      // No personal save — try the board baked into this HTML page.
+      const baked = readBakedData();
+      if (baked) {
+        await loadFromObject(baked);
+        return;
+      }
+      seedBoard();
     } catch (e) { seedBoard(); }
   }
   function validateBoard(obj) {
@@ -2132,6 +2180,39 @@
     return { view: state.view, items, paths: state.paths, nextId: state.nextId };
   }
 
+  async function bakeIntoPage() {
+    showToast('Building snapshot…');
+    let html;
+    try {
+      // Fetch the live source so we don't drift if the script ever changed mid-session
+      const url = new URL('whiteboard.html', window.location.href);
+      const res = await fetch(url.toString(), { cache: 'no-cache' });
+      if (!res.ok) throw new Error('fetch ' + res.status);
+      html = await res.text();
+    } catch (e) {
+      showToast('Could not read whiteboard.html', 'danger');
+      return;
+    }
+    const exportData = await buildExportData();
+    // Escape characters that would terminate the inline <script>
+    const jsonStr = JSON.stringify(exportData).replace(/</g, '\\u003c');
+    const re = /(<script id="board-data" type="application\/json">)[\s\S]*?(<\/script>)/;
+    if (!re.test(html)) {
+      showToast('Page is missing the board-data slot', 'danger');
+      return;
+    }
+    const newHtml = html.replace(re, `$1${jsonStr}$2`);
+    const blob = new Blob([newHtml], { type: 'text/html' });
+    const dlUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = dlUrl; a.download = 'whiteboard.html';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(dlUrl), 1000);
+    const mb = (newHtml.length / (1024 * 1024)).toFixed(1);
+    showToast(`Baked snapshot (${mb} MB). Replace whiteboard.html in your repo.`);
+  }
+  document.getElementById('bakeBtn').addEventListener('click', bakeIntoPage);
+
   document.getElementById('exportBtn').addEventListener('click', async () => {
     const obj = await buildExportData();
     const data = JSON.stringify(obj, null, 2);
@@ -2226,7 +2307,7 @@
     setClipboard: (c) => { clipboard = c; },
     getDraft: () => ({ arrow: arrowDraft, pen: penDraft, marquee }),
     idbGet, idbPut, idbDelete, idbKeys,
-    load, buildExportData,
+    load, buildExportData, readBakedData, bakeIntoPage, loadFromObject,
     seedBoard: () => {
       state.items = []; state.paths = []; state.nextId = 1;
       state.history = []; state.historyIndex = -1;
