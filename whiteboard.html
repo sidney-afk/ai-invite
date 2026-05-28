@@ -588,6 +588,9 @@
   'use strict';
 
   const STORAGE_KEY = 'ai-invite-whiteboard-v1';
+  const IDB_NAME = 'ai-invite-wb';
+  const IDB_STORE = 'assets';
+  const IDB_VERSION = 1;
   const MAX_HISTORY = 80;
   const OFF = 100000;        // svg-layer offset
   const GRID = 28;
@@ -660,6 +663,68 @@
     return { x1: endA.x, y1: endA.y, x2: endB.x, y2: endB.y };
   }
 
+  /* ---------- IndexedDB asset store (videos / images / audio Blobs) ---------- */
+  let _dbPromise = null;
+  function openDB() {
+    if (_dbPromise) return _dbPromise;
+    if (typeof indexedDB === 'undefined') {
+      _dbPromise = Promise.reject(new Error('IndexedDB not supported'));
+      return _dbPromise;
+    }
+    _dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return _dbPromise;
+  }
+  async function idbPut(key, val) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(val, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+  async function idbGet(key) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const r = tx.objectStore(IDB_STORE).get(key);
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  }
+  async function idbDelete(key) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+  async function idbKeys() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const r = tx.objectStore(IDB_STORE).getAllKeys();
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  }
+  // Drop IDB blobs that no item references anymore (called after delete/clear)
+  async function pruneOrphanAssets() {
+    try {
+      const live = new Set(state.items.map(i => i.assetId).filter(Boolean));
+      const keys = await idbKeys();
+      await Promise.all(keys.filter(k => !live.has(k)).map(k => idbDelete(k).catch(() => {})));
+    } catch (e) {}
+  }
+
   /* ---------- Persistence ---------- */
   function save() {
     try {
@@ -676,7 +741,7 @@
       }
     }
   }
-  function load() {
+  async function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) { seedBoard(); return; }
@@ -686,6 +751,15 @@
       state.items = obj.items || [];
       state.paths = obj.paths || [];
       state.nextId = obj.nextId || (state.items.length + state.paths.length + 1);
+      // Re-hydrate media srcs from IndexedDB for items whose blob was stripped on save
+      await Promise.all(state.items.map(async (it) => {
+        if (it.assetId && !it.src) {
+          try {
+            const blob = await idbGet(it.assetId);
+            if (blob) it.src = URL.createObjectURL(blob);
+          } catch (e) { /* leave src null → placeholder shows */ }
+        }
+      }));
     } catch (e) { seedBoard(); }
   }
   function validateBoard(obj) {
@@ -1037,11 +1111,13 @@
     if (!state.selection.length) return;
     const itemIds = new Set(state.selection.filter(s => s.kind === 'item').map(s => s.id));
     const pathIds = new Set(state.selection.filter(s => s.kind === 'path').map(s => s.id));
-    // Revoke blob URLs on removed items
+    // Revoke blob URLs and drop IDB-backed asset blobs for items being removed
     for (const it of state.items) {
-      if (itemIds.has(it.id) && it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) {
+      if (!itemIds.has(it.id)) continue;
+      if (it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) {
         try { URL.revokeObjectURL(it.src); } catch (e) {}
       }
+      if (it.assetId) idbDelete(it.assetId).catch(() => {});
     }
     // Detach (don't delete) arrows linked to deleted items
     for (const p of state.paths) {
@@ -1345,15 +1421,21 @@
     return { w: Math.round(maxDim * aspect), h: maxDim };
   }
   async function addMediaItem(type, file, center) {
-    let src;
-    const maxBytesForDataURL = type === 'image' ? 4*1024*1024 : 1*1024*1024;
+    // Persist the actual Blob in IndexedDB so it survives reloads of any size.
+    const assetId = 'a' + state.nextId++;
+    let persisted = false;
     try {
-      if (file.size <= maxBytesForDataURL) src = await readFileAsDataURL(file);
-      else src = URL.createObjectURL(file);
+      await idbPut(assetId, file);
+      persisted = true;
     } catch (e) {
-      showToast('Could not read file', 'danger');
-      return;
+      if (e && (e.name === 'QuotaExceededError' || /quota/i.test(e.message || ''))) {
+        showToast('Storage full — file will not survive a reload', 'danger');
+      } else {
+        showToast('Could not save media (in-memory only)', 'danger');
+      }
     }
+    // Always create a blob URL for the current session (works whether IDB succeeded or not).
+    const src = URL.createObjectURL(file);
     let dims;
     if (type === 'audio') {
       dims = { w: 320, h: 60 };
@@ -1363,8 +1445,11 @@
       const fallback = type === 'video' ? { w: 360, h: 200 } : { w: 280, h: 200 };
       dims = fitBoxToAspect(natural, fallback, maxDim);
     }
-    const item = { id: state.nextId++, type, x: center.x - dims.w/2, y: center.y - dims.h/2,
-                    w: dims.w, h: dims.h, src, name: file.name };
+    const item = { id: state.nextId++, type,
+                    x: center.x - dims.w/2, y: center.y - dims.h/2,
+                    w: dims.w, h: dims.h,
+                    src, name: file.name, mime: file.type,
+                    assetId: persisted ? assetId : null };
     state.items.push(item);
     renderAll(); selectItem(item.id);
     commitHistory(); save();
@@ -2004,25 +2089,59 @@
 
   document.getElementById('clearBtn').addEventListener('click', () => {
     if (!confirm('Clear the whole board? You can undo with Ctrl+Z.')) return;
-    // Revoke blob urls
+    // Revoke blob urls and drop IDB assets for everything being removed
     for (const it of state.items) {
       if (it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) {
         try { URL.revokeObjectURL(it.src); } catch (e) {}
       }
+      if (it.assetId) idbDelete(it.assetId).catch(() => {});
     }
     state.items = []; state.paths = []; state.selection = [];
     renderAll(); commitHistory(); save();
     showToast('Board cleared');
   });
 
-  document.getElementById('exportBtn').addEventListener('click', () => {
-    const data = JSON.stringify({ view: state.view, items: state.items, paths: state.paths, nextId: state.nextId }, null, 2);
+  function blobToDataURL(blob) {
+    return new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload  = () => resolve(r.result);
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(blob);
+    });
+  }
+  async function buildExportData() {
+    // Replace blob: srcs and assetIds with embedded dataURLs so the JSON
+    // is self-contained and can be opened on another device / browser.
+    const items = await Promise.all(state.items.map(async (it) => {
+      if (it.assetId) {
+        try {
+          const blob = await idbGet(it.assetId);
+          if (blob) {
+            const dataUrl = await blobToDataURL(blob);
+            return { ...it, src: dataUrl, assetId: null };
+          }
+        } catch (e) {}
+      }
+      // Item already has a usable src (dataURL or remote URL): keep it.
+      // Strip blob: URLs since they're session-local and useless to export.
+      if (it.src && typeof it.src === 'string' && it.src.startsWith('blob:')) {
+        return { ...it, src: null };
+      }
+      return it;
+    }));
+    return { view: state.view, items, paths: state.paths, nextId: state.nextId };
+  }
+
+  document.getElementById('exportBtn').addEventListener('click', async () => {
+    const obj = await buildExportData();
+    const data = JSON.stringify(obj, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'ai-invite-board.json';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast('Exported');
+    const mb = (data.length / (1024 * 1024)).toFixed(1);
+    showToast(`Exported (${mb} MB, media embedded)`);
   });
   document.getElementById('importBtn').addEventListener('click', () => document.getElementById('fileImport').click());
   document.getElementById('fileImport').addEventListener('change', async (e) => {
@@ -2041,6 +2160,19 @@
       state.paths = obj.paths || [];
       state.nextId = obj.nextId || (state.items.length + state.paths.length + 1);
       state.selection = [];
+      // Move embedded dataURL media into IndexedDB so it persists on this device too.
+      await Promise.all(state.items.map(async (it) => {
+        if (!it.assetId && it.src && typeof it.src === 'string' && it.src.startsWith('data:')) {
+          try {
+            const res = await fetch(it.src);
+            const blob = await res.blob();
+            const assetId = 'a' + state.nextId++;
+            await idbPut(assetId, blob);
+            it.assetId = assetId;
+            it.src = URL.createObjectURL(blob);
+          } catch (err) { /* keep dataURL src as fallback */ }
+        }
+      }));
       renderAll(); commitHistory(); save();
       showToast('Imported');
     } catch (err) {
@@ -2093,6 +2225,8 @@
     cancelDraftsAndDrag,
     setClipboard: (c) => { clipboard = c; },
     getDraft: () => ({ arrow: arrowDraft, pen: penDraft, marquee }),
+    idbGet, idbPut, idbDelete, idbKeys,
+    load, buildExportData,
     seedBoard: () => {
       state.items = []; state.paths = []; state.nextId = 1;
       state.history = []; state.historyIndex = -1;
@@ -2101,10 +2235,13 @@
   };
 
   /* ---------- Boot ---------- */
-  load();
-  renderAll();
-  setTool('select');
-  commitHistory();
+  (async () => {
+    await load();
+    renderAll();
+    setTool('select');
+    commitHistory();
+    pruneOrphanAssets();
+  })();
 })();
 </script>
 </body>
