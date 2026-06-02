@@ -655,6 +655,7 @@
 
   const STORAGE_KEY = 'ai-invite-whiteboard-v1';
   const VIEW_KEY    = 'ai-invite-whiteboard-view-v1';
+  const SEEN_PUBLISH_KEY = 'ai-invite-whiteboard-last-publish-v1';
   const IDB_NAME = 'ai-invite-wb';
   const IDB_STORE = 'assets';
   const IDB_VERSION = 1;
@@ -887,6 +888,19 @@
 
     loadView();
     const baked = readBakedData();
+
+    // Auto-refresh: if the page contains a newer publish than what this
+    // browser has previously seen, any pre-existing personal save is
+    // presumed to be a leftover view of an older publish. Wipe it so the
+    // boss / a returning visitor automatically sees the new board after a
+    // reload — no DevTools, no ?reset URL, nothing for them to learn.
+    const bakedTs = (baked && typeof baked.publishedAt === 'number') ? baked.publishedAt : 0;
+    const seenTs = parseInt(localStorage.getItem(SEEN_PUBLISH_KEY) || '0', 10) || 0;
+    if (bakedTs > 0 && bakedTs > seenTs) {
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+      try { localStorage.setItem(SEEN_PUBLISH_KEY, String(bakedTs)); } catch (e) {}
+    }
+
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -2426,6 +2440,10 @@
       return;
     }
     const { board, mediaFiles } = await buildExportWithExternalMedia('media');
+    // Stamp the bake so every viewer's browser can detect "newer than what I
+    // last saw" and refresh itself without DevTools or ?reset.
+    board.publishedAt = Date.now();
+    try { localStorage.setItem(SEEN_PUBLISH_KEY, String(board.publishedAt)); } catch (e) {}
     const jsonStr = JSON.stringify(board).replace(/</g, '\\u003c');
     const re = /(<script id="board-data" type="application\/json">)[\s\S]*?(<\/script>)/;
     if (!re.test(html)) {
